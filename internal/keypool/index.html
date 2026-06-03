@@ -16,7 +16,7 @@
             padding: 20px;
         }
         .container {
-            max-width: 900px;
+            max-width: 1200px;
             margin: 0 auto;
         }
         h1 {
@@ -25,10 +25,10 @@
         }
         .card {
             background: #fff;
-            border-radius: 8px;
-            padding: 20px;
+            border-radius: 12px;
+            padding: 24px;
             margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
         .stats {
             display: grid;
@@ -37,102 +37,190 @@
         }
         .stat-item {
             text-align: center;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 6px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            color: #fff;
+        }
+        .stat-item:nth-child(2) {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .stat-item:nth-child(3) {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
         }
         .stat-value {
-            font-size: 28px;
+            font-size: 32px;
             font-weight: bold;
-            color: #1890ff;
         }
         .stat-label {
-            color: #666;
+            opacity: 0.9;
             margin-top: 5px;
+            font-size: 14px;
         }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        th, td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #eee;
-        }
-        th {
-            background: #f8f9fa;
-            font-weight: 600;
-        }
-        .key-cell {
-            font-family: monospace;
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-        }
-        .badge-enabled {
-            background: #d4edda;
-            color: #155724;
-        }
-        .badge-disabled {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        .actions {
+        .section-header {
             display: flex;
-            gap: 8px;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
         }
-        button {
-            padding: 6px 12px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        .btn-add {
-            background: #1890ff;
-            color: #fff;
-        }
-        .btn-enable {
-            background: #52c41a;
-            color: #fff;
-        }
-        .btn-disable {
-            background: #faad14;
-            color: #fff;
-        }
-        .btn-remove {
-            background: #ff4d4f;
-            color: #fff;
-        }
-        button:hover {
-            opacity: 0.8;
-        }
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
         }
         .add-form {
             display: flex;
             gap: 10px;
-            margin-top: 15px;
         }
         .add-form input {
+            width: 300px;
+            padding: 10px 16px;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        .add-form input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .btn-add {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn-add:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .keys-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .key-card {
+            background: #fff;
+            border: 1px solid #f0f0f0;
+            border-radius: 12px;
+            padding: 20px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .key-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .key-card.disabled {
+            opacity: 0.6;
+            background: #fafafa;
+        }
+        .key-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+        .key-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .key-card.disabled .key-icon {
+            background: #ccc;
+        }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status-enabled {
+            background: #e6f7ed;
+            color: #52c41a;
+        }
+        .status-disabled {
+            background: #fff1e6;
+            color: #fa8c16;
+        }
+        .key-info {
+            margin-bottom: 16px;
+        }
+        .key-value {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            color: #333;
+            background: #f8f9fa;
+            padding: 10px 12px;
+            border-radius: 6px;
+            word-break: break-all;
+            margin-bottom: 8px;
+        }
+        .key-meta {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+            color: #999;
+        }
+        .key-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .btn-enable, .btn-disable, .btn-remove {
             flex: 1;
             padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .btn-enable {
+            background: #e6f7ed;
+            color: #52c41a;
+        }
+        .btn-enable:hover {
+            background: #b7eb8f;
+        }
+        .btn-disable {
+            background: #fff1e6;
+            color: #fa8c16;
+        }
+        .btn-disable:hover {
+            background: #ffd591;
+        }
+        .btn-remove {
+            background: #fff1f0;
+            color: #ff4d4f;
+        }
+        .btn-remove:hover {
+            background: #ffccc7;
         }
         .refresh-time {
             color: #999;
             font-size: 12px;
-            margin-top: 10px;
+            margin-top: 20px;
+            text-align: center;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
         }
     </style>
 </head>
@@ -141,7 +229,6 @@
         <h1>MiMo Key 管理</h1>
         
         <div class="card">
-            <h2>统计</h2>
             <div class="stats">
                 <div class="stat-item">
                     <div class="stat-value" id="proxyRequests">-</div>
@@ -156,28 +243,20 @@
                     <div class="stat-label">Key 数量</div>
                 </div>
             </div>
-            <div class="refresh-time" id="refreshTime"></div>
         </div>
 
         <div class="card">
-            <h2>Keys</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Key</th>
-                        <th>用量</th>
-                        <th>状态</th>
-                        <th>添加时间</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody id="keysTable"></tbody>
-            </table>
+            <div class="section-header">
+                <span class="section-title">API Keys</span>
+            </div>
             <div class="add-form">
                 <input type="text" id="newKeyInput" placeholder="输入新 Key">
-                <button class="btn-add" onclick="addKey()">添加</button>
+                <button class="btn-add" onclick="addKey()">+ 添加</button>
             </div>
+            <div id="keysGrid" class="keys-grid"></div>
         </div>
+
+        <div class="refresh-time" id="refreshTime"></div>
     </div>
 
     <script>
@@ -201,29 +280,48 @@
             try {
                 const res = await fetch(API_BASE + '/keys');
                 const data = await res.json();
-                const tbody = document.getElementById('keysTable');
-                tbody.innerHTML = '';
+                const grid = document.getElementById('keysGrid');
                 
-                for (const key of data.keys || []) {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="key-cell" title="${key.key}">${maskKey(key.key)}</td>
-                        <td>${key.usage_count}</td>
-                        <td>
-                            <span class="badge ${key.enabled ? 'badge-enabled' : 'badge-disabled'}">
-                                ${key.enabled ? '启用' : '禁用'}
+                if (!data.keys || data.keys.length === 0) {
+                    grid.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🔑</div>
+                            <div>暂无 Key</div>
+                            <div style="font-size:13px;margin-top:8px;">添加你的第一个 API Key 开始使用</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                grid.innerHTML = '';
+                
+                for (const key of data.keys) {
+                    const initial = key.key.substring(0, 1).toUpperCase();
+                    const card = document.createElement('div');
+                    card.className = `key-card ${key.enabled ? '' : 'disabled'}`;
+                    card.innerHTML = `
+                        <div class="key-header">
+                            <div class="key-icon">${initial}</div>
+                            <span class="status-badge ${key.enabled ? 'status-enabled' : 'status-disabled'}">
+                                ${key.enabled ? '● 启用' : '○ 禁用'}
                             </span>
-                        </td>
-                        <td>${key.created_at}</td>
-                        <td class="actions">
+                        </div>
+                        <div class="key-info">
+                            <div class="key-value" title="${key.key}">${maskKey(key.key)}</div>
+                            <div class="key-meta">
+                                <span>用量: ${key.usage_count}</span>
+                                <span>${formatDate(key.created_at)}</span>
+                            </div>
+                        </div>
+                        <div class="key-actions">
                             <button class="${key.enabled ? 'btn-disable' : 'btn-enable'}" 
                                     onclick="toggleKey('${key.key}', ${key.enabled})">
                                 ${key.enabled ? '禁用' : '启用'}
                             </button>
                             <button class="btn-remove" onclick="removeKey('${key.key}')">删除</button>
-                        </td>
+                        </div>
                     `;
-                    tbody.appendChild(tr);
+                    grid.appendChild(card);
                 }
             } catch (e) {
                 console.error('Failed to fetch keys:', e);
@@ -233,6 +331,11 @@
         function maskKey(key) {
             if (key.length <= 8) return '****' + key.slice(-4);
             return key.slice(0, 4) + '****' + key.slice(-4);
+        }
+
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('zh-CN');
         }
 
         async function addKey() {
