@@ -1,0 +1,29 @@
+# Binaries
+/proxy
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output
+*.out
+
+# Go workspace file
+gw.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Database
+keys.db
+
+# OS
+.DS_Store
+Thumbs.db

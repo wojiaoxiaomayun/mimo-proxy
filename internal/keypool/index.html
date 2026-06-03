@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiMo Key 管理</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #1890ff;
+        }
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+        .key-cell {
+            font-family: monospace;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .badge-enabled {
+            background: #d4edda;
+            color: #155724;
+        }
+        .badge-disabled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .actions {
+            display: flex;
+            gap: 8px;
+        }
+        button {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .btn-add {
+            background: #1890ff;
+            color: #fff;
+        }
+        .btn-enable {
+            background: #52c41a;
+            color: #fff;
+        }
+        .btn-disable {
+            background: #faad14;
+            color: #fff;
+        }
+        .btn-remove {
+            background: #ff4d4f;
+            color: #fff;
+        }
+        button:hover {
+            opacity: 0.8;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .add-form {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .add-form input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .refresh-time {
+            color: #999;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MiMo Key 管理</h1>
+        
+        <div class="card">
+            <h2>统计</h2>
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="proxyRequests">-</div>
+                    <div class="stat-label">代理请求</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="totalUsage">-</div>
+                    <div class="stat-label">总用量</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="keyCount">-</div>
+                    <div class="stat-label">Key 数量</div>
+                </div>
+            </div>
+            <div class="refresh-time" id="refreshTime"></div>
+        </div>
+
+        <div class="card">
+            <h2>Keys</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>用量</th>
+                        <th>状态</th>
+                        <th>添加时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="keysTable"></tbody>
+            </table>
+            <div class="add-form">
+                <input type="text" id="newKeyInput" placeholder="输入新 Key">
+                <button class="btn-add" onclick="addKey()">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        async function fetchStats() {
+            try {
+                const res = await fetch(API_BASE + '/stats');
+                const data = await res.json();
+                document.getElementById('proxyRequests').textContent = data.proxy_requests || 0;
+                document.getElementById('totalUsage').textContent = data.total_usage || 0;
+                const enabled = data.enabled_keys || 0;
+                const disabled = data.disabled_keys || 0;
+                document.getElementById('keyCount').textContent = enabled + disabled;
+            } catch (e) {
+                console.error('Failed to fetch stats:', e);
+            }
+        }
+
+        async function fetchKeys() {
+            try {
+                const res = await fetch(API_BASE + '/keys');
+                const data = await res.json();
+                const tbody = document.getElementById('keysTable');
+                tbody.innerHTML = '';
+                
+                for (const key of data.keys || []) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="key-cell" title="${key.key}">${maskKey(key.key)}</td>
+                        <td>${key.usage_count}</td>
+                        <td>
+                            <span class="badge ${key.enabled ? 'badge-enabled' : 'badge-disabled'}">
+                                ${key.enabled ? '启用' : '禁用'}
+                            </span>
+                        </td>
+                        <td>${key.created_at}</td>
+                        <td class="actions">
+                            <button class="${key.enabled ? 'btn-disable' : 'btn-enable'}" 
+                                    onclick="toggleKey('${key.key}', ${key.enabled})">
+                                ${key.enabled ? '禁用' : '启用'}
+                            </button>
+                            <button class="btn-remove" onclick="removeKey('${key.key}')">删除</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+            } catch (e) {
+                console.error('Failed to fetch keys:', e);
+            }
+        }
+
+        function maskKey(key) {
+            if (key.length <= 8) return '****' + key.slice(-4);
+            return key.slice(0, 4) + '****' + key.slice(-4);
+        }
+
+        async function addKey() {
+            const input = document.getElementById('newKeyInput');
+            const key = input.value.trim();
+            if (!key) return;
+
+            try {
+                const res = await fetch(API_BASE + '/keys', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action: 'add', key})
+                });
+                if (res.ok) {
+                    input.value = '';
+                    await fetchKeys();
+                    await fetchStats();
+                }
+            } catch (e) {
+                alert('添加失败: ' + e);
+            }
+        }
+
+        async function toggleKey(key, currentlyEnabled) {
+            const action = currentlyEnabled ? 'disable' : 'enable';
+            try {
+                const res = await fetch(API_BASE + '/keys', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action, key})
+                });
+                if (res.ok) {
+                    await fetchKeys();
+                    await fetchStats();
+                }
+            } catch (e) {
+                alert('操作失败: ' + e);
+            }
+        }
+
+        async function removeKey(key) {
+            if (!confirm('确定删除这个 Key?')) return;
+            try {
+                const res = await fetch(API_BASE + '/keys', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action: 'remove', key})
+                });
+                if (res.ok) {
+                    await fetchKeys();
+                    await fetchStats();
+                }
+            } catch (e) {
+                alert('删除失败: ' + e);
+            }
+        }
+
+        function updateTime() {
+            document.getElementById('refreshTime').textContent = 
+                '最后更新: ' + new Date().toLocaleTimeString();
+        }
+
+        async function refresh() {
+            await Promise.all([fetchStats(), fetchKeys()]);
+            updateTime();
+        }
+
+        refresh();
+        setInterval(refresh, 10000);
+    </script>
+</body>
+</html>
