@@ -11,15 +11,26 @@ import (
 )
 
 type KeyInfo struct {
-	ID              int    `json:"id"`
-	Key             string `json:"key"`
-	Note            string `json:"note"`
-	UsageCount      int    `json:"usage_count"`
-	PromptTokens    int    `json:"prompt_tokens"`
-	CompletionTokens int   `json:"completion_tokens"`
-	TotalTokens     int    `json:"total_tokens"`
-	Enabled         bool   `json:"enabled"`
-	CreatedAt       string `json:"created_at"`
+	ID               int    `json:"id"`
+	Key              string `json:"key"`
+	ChannelID        int    `json:"channel_id"`
+	Note             string `json:"note"`
+	UsageCount       int    `json:"usage_count"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	Enabled          bool   `json:"enabled"`
+	CreatedAt        string `json:"created_at"`
+}
+
+type ChannelInfo struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Prefix    string `json:"prefix"`
+	BaseURL   string `json:"base_url"`
+	Enabled   bool   `json:"enabled"`
+	IsDefault bool   `json:"is_default"`
+	CreatedAt string `json:"created_at"`
 }
 
 type KeyPool struct {
@@ -27,7 +38,7 @@ type KeyPool struct {
 	mu sync.RWMutex
 }
 
-func New(dbPath string) (*KeyPool, error) {
+func New(dbPath, defaultURL string) (*KeyPool, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, err
@@ -46,16 +57,53 @@ func New(dbPath string) (*KeyPool, error) {
 		return nil, err
 	}
 
-	// Migrate: add token columns if missing (existing DBs).
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS channels (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL DEFAULT '',
+			prefix TEXT UNIQUE NOT NULL,
+			base_url TEXT NOT NULL,
+			enabled INTEGER DEFAULT 1,
+			is_default INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure at least one default channel exists.
+	var chCount int
+	db.QueryRow(`SELECT COUNT(*) FROM channels`).Scan(&chCount)
+	if chCount == 0 {
+		db.Exec(`INSERT INTO channels (name, prefix, base_url, is_default) VALUES ('默认', 'default', ?, 1)`, defaultURL)
+	}
+
+	// Migrate: add columns if missing.
 	for _, col := range []string{
 		"ALTER TABLE api_keys ADD COLUMN prompt_tokens INTEGER DEFAULT 0",
 		"ALTER TABLE api_keys ADD COLUMN completion_tokens INTEGER DEFAULT 0",
 		"ALTER TABLE api_keys ADD COLUMN total_tokens INTEGER DEFAULT 0",
 		"ALTER TABLE api_keys ADD COLUMN note TEXT DEFAULT ''",
+		"ALTER TABLE api_keys ADD COLUMN channel_id INTEGER DEFAULT 0",
+		"ALTER TABLE channels ADD COLUMN is_default INTEGER DEFAULT 0",
 		"ALTER TABLE request_logs ADD COLUMN request_body TEXT DEFAULT ''",
 		"ALTER TABLE request_logs ADD COLUMN response_body TEXT DEFAULT ''",
 	} {
 		db.Exec(col) // ignore duplicate-column errors
+	}
+
+	// Migrate existing keys to default channel (channel_id=0 → first channel).
+	var defaultChID int
+	db.QueryRow(`SELECT id FROM channels ORDER BY id LIMIT 1`).Scan(&defaultChID)
+	db.Exec(`UPDATE api_keys SET channel_id = ? WHERE channel_id = 0`, defaultChID)
+
+	// Migrate: fix empty-prefix channels and ensure a default exists.
+	db.Exec(`UPDATE channels SET prefix = 'default' WHERE prefix = ''`)
+	var hasDefault int
+	db.QueryRow(`SELECT COUNT(*) FROM channels WHERE is_default = 1`).Scan(&hasDefault)
+	if hasDefault == 0 {
+		db.Exec(`UPDATE channels SET is_default = 1 WHERE id = (SELECT MIN(id) FROM channels)`)
 	}
 
 	_, err = db.Exec(`
@@ -107,7 +155,7 @@ func New(dbPath string) (*KeyPool, error) {
 	return &KeyPool{db: db}, nil
 }
 
-func (p *KeyPool) GetKey() (string, error) {
+func (p *KeyPool) GetKey(channelID int) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -115,13 +163,13 @@ func (p *KeyPool) GetKey() (string, error) {
 	var enabled bool
 	err := p.db.QueryRow(`
 		SELECT key, enabled FROM api_keys 
-		WHERE enabled = 1 
+		WHERE enabled = 1 AND channel_id = ?
 		ORDER BY usage_count ASC, id ASC 
 		LIMIT 1
-	`).Scan(&key, &enabled)
+	`, channelID).Scan(&key, &enabled)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("no available API key")
+			return "", fmt.Errorf("no available API key for channel %d", channelID)
 		}
 		return "", err
 	}
@@ -142,10 +190,10 @@ func (p *KeyPool) IncrementUsage(key string, promptTokens, completionTokens, tot
 	return err
 }
 
-func (p *KeyPool) Add(key, note string) error {
+func (p *KeyPool) Add(key, note string, channelID int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, err := p.db.Exec(`INSERT OR IGNORE INTO api_keys (key, note) VALUES (?, ?)`, key, note)
+	_, err := p.db.Exec(`INSERT OR IGNORE INTO api_keys (key, note, channel_id) VALUES (?, ?, ?)`, key, note, channelID)
 	return err
 }
 
@@ -177,13 +225,17 @@ func (p *KeyPool) UpdateNote(key, note string) error {
 	return err
 }
 
-func (p *KeyPool) GetAll() ([]KeyInfo, error) {
+func (p *KeyPool) GetAll(channelID int) ([]KeyInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	rows, err := p.db.Query(`
-		SELECT id, key, note, usage_count, prompt_tokens, completion_tokens, total_tokens, enabled, created_at FROM api_keys ORDER BY id
-	`)
+	var rows *sql.Rows
+	var err error
+	if channelID > 0 {
+		rows, err = p.db.Query(`SELECT id, key, channel_id, note, usage_count, prompt_tokens, completion_tokens, total_tokens, enabled, created_at FROM api_keys WHERE channel_id = ? ORDER BY id`, channelID)
+	} else {
+		rows, err = p.db.Query(`SELECT id, key, channel_id, note, usage_count, prompt_tokens, completion_tokens, total_tokens, enabled, created_at FROM api_keys ORDER BY id`)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +244,7 @@ func (p *KeyPool) GetAll() ([]KeyInfo, error) {
 	var keys []KeyInfo
 	for rows.Next() {
 		var k KeyInfo
-		if err := rows.Scan(&k.ID, &k.Key, &k.Note, &k.UsageCount, &k.PromptTokens, &k.CompletionTokens, &k.TotalTokens, &k.Enabled, &k.CreatedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.Key, &k.ChannelID, &k.Note, &k.UsageCount, &k.PromptTokens, &k.CompletionTokens, &k.TotalTokens, &k.Enabled, &k.CreatedAt); err != nil {
 			return nil, err
 		}
 		keys = append(keys, k)
@@ -224,11 +276,16 @@ func (p *KeyPool) GetStats() (totalTokens int64, totalCalls int64, enabledCount,
 }
 
 func (p *KeyPool) LoadFromEnv(keysStr string) error {
+	ch, _ := p.GetDefaultChannel()
+	cid := 0
+	if ch != nil {
+		cid = ch.ID
+	}
 	keys := strings.Split(keysStr, ",")
 	for _, key := range keys {
 		key = strings.TrimSpace(key)
 		if key != "" {
-			if err := p.Add(key, ""); err != nil {
+			if err := p.Add(key, "", cid); err != nil {
 				return err
 			}
 		}
@@ -238,6 +295,102 @@ func (p *KeyPool) LoadFromEnv(keysStr string) error {
 
 func (p *KeyPool) Close() error {
 	return p.db.Close()
+}
+
+// ============ Channels ============
+
+func (p *KeyPool) GetAllChannels() ([]ChannelInfo, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	rows, err := p.db.Query(`SELECT id, name, prefix, base_url, enabled, is_default, created_at FROM channels ORDER BY is_default DESC, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var channels []ChannelInfo
+	for rows.Next() {
+		var c ChannelInfo
+		if err := rows.Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		channels = append(channels, c)
+	}
+	return channels, nil
+}
+
+func (p *KeyPool) GetChannelByPrefix(prefix string) (*ChannelInfo, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var c ChannelInfo
+	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, enabled, is_default, created_at FROM channels WHERE prefix = ? AND enabled = 1`, prefix).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (p *KeyPool) GetDefaultChannel() (*ChannelInfo, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var c ChannelInfo
+	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, enabled, is_default, created_at FROM channels WHERE is_default = 1 AND enabled = 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.CreatedAt)
+	if err != nil {
+		// Fallback: first enabled channel
+		err = p.db.QueryRow(`SELECT id, name, prefix, base_url, enabled, is_default, created_at FROM channels WHERE enabled = 1 ORDER BY id LIMIT 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.CreatedAt)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (p *KeyPool) AddChannel(name, prefix, baseURL string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if prefix == "" {
+		return fmt.Errorf("prefix is required")
+	}
+	_, err := p.db.Exec(`INSERT INTO channels (name, prefix, base_url) VALUES (?, ?, ?)`, name, prefix, baseURL)
+	return err
+}
+
+func (p *KeyPool) SetDefaultChannel(id int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.db.Exec(`UPDATE channels SET is_default = 0`)
+	_, err := p.db.Exec(`UPDATE channels SET is_default = 1 WHERE id = ?`, id)
+	return err
+}
+
+func (p *KeyPool) UpdateChannel(id int, name, prefix, baseURL string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if prefix == "" {
+		return fmt.Errorf("prefix is required")
+	}
+	_, err := p.db.Exec(`UPDATE channels SET name = ?, prefix = ?, base_url = ? WHERE id = ?`, name, prefix, baseURL, id)
+	return err
+}
+
+func (p *KeyPool) RemoveChannel(id int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`DELETE FROM channels WHERE id = ?`, id)
+	return err
+}
+
+func (p *KeyPool) EnableChannel(id int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE channels SET enabled = 1 WHERE id = ?`, id)
+	return err
+}
+
+func (p *KeyPool) DisableChannel(id int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE channels SET enabled = 0 WHERE id = ?`, id)
+	return err
 }
 
 // ============ Proxy Keys (sk-xxx) ============

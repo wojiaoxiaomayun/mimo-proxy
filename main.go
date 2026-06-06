@@ -1,6 +1,8 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -8,14 +10,14 @@ import (
 	"github.com/myapp/internal/keypool"
 )
 
-const (
-	targetURL = "https://api.xiaomimimo.com/v1/chat/completions"
-	port     = "8080"
-	dbPath   = "keys.db"
-)
-
 func main() {
-	pool, err := keypool.New(dbPath)
+	port := flag.Int("port", 10080, "server port")
+	flag.Parse()
+
+	targetURL := "https://api.xiaomimimo.com/v1/chat/completions"
+	dbPath := "keys.db"
+
+	pool, err := keypool.New(dbPath, targetURL)
 	if err != nil {
 		log.Fatalf("Failed to initialize key pool: %v", err)
 	}
@@ -29,8 +31,8 @@ func main() {
 
 	mux := keypool.NewMux(pool, targetURL)
 
-	log.Printf("转发服务启动，监听 :%s，数据存储: %s", port, dbPath)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	log.Printf("转发服务启动，监听 :%d，数据存储: %s", *port, dbPath)
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), mux); err != nil {
 		log.Fatal(err)
 	}
 }

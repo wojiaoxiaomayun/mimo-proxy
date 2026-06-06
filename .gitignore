@@ -23,7 +23,22 @@ gw.exe
 
 # Database
 keys.db
+keys.db-shm
+keys.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# AI tools
+.agents/
+.codegraph/
+.reasonix/
+skills-lock.json
 
 # OS
 .DS_Store
 Thumbs.db
+screenshot.png

@@ -290,6 +290,29 @@
         .result-error-banner .result-icon { color: hsl(0 84.2% 60.2%); }
         .result-success-banner span { font-weight: 600; font-size: 0.875rem; color: hsl(142 76% 30%); }
 
+        /* ===== Tooltip ===== */
+        [data-tip] { position: relative; }
+        [data-tip]::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 8px;
+            font-size: 0.6875rem;
+            font-weight: 500;
+            white-space: nowrap;
+            background: hsl(var(--foreground));
+            color: hsl(var(--background));
+            border-radius: var(--radius);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.15s, visibility 0.15s;
+            pointer-events: none;
+            z-index: 10;
+        }
+        [data-tip]:hover::after { opacity: 1; visibility: visible; }
+
         /* ===== Pagination ===== */
         .pagination {
             display: flex;
@@ -357,6 +380,10 @@
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>
                 Key 管理
             </a>
+            <a class="nav-item" data-page="channels" onclick="switchPage('channels')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></g></svg>
+                渠道
+            </a>
             <a class="nav-item" data-page="logs" onclick="switchPage('logs')">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 12h-5m5-4h-5m9 9V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></g></svg>
                 日志
@@ -398,10 +425,15 @@
                     <div class="card-header">
                         <div style="display:flex;justify-content:space-between;align-items:center;">
                             <div class="card-title">API Keys</div>
-                            <button class="btn btn-primary btn-sm" onclick="openAddKeyModal()">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
-                                添加 Key
-                            </button>
+                            <div style="display:flex;gap:0.5rem;align-items:center;">
+                                <select id="channelFilter" style="width:10rem;height:2rem;font-size:0.8125rem;" onchange="fetchKeys()">
+                                    <option value="0">全部渠道</option>
+                                </select>
+                                <button class="btn btn-primary btn-sm" onclick="openAddKeyModal()">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
+                                    添加 Key
+                                </button>
+                            </div>
                         </div>
                         <div class="card-description" style="margin-top:0.5rem;">管理 API Key，每个 Key 可添加备注标识来源账号</div>
                     </div>
@@ -414,34 +446,33 @@
             </div>
         </div>
 
+        <!-- === Channels Page === -->
+        <div class="page" id="page-channels">
+            <div class="main-header">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <h1>渠道管理</h1>
+                        <p>管理上游 API 渠道，每个渠道可设置独立的 Base URL 和路由前缀</p>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="openAddChannelModal()">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
+                        添加渠道
+                    </button>
+                </div>
+            </div>
+            <div class="main-body">
+                <div id="channelsGrid"></div>
+            </div>
+        </div>
+
         <!-- === Settings Page === -->
         <div class="page" id="page-settings">
             <div class="main-header">
                 <h1>设置</h1>
-                <p>配置代理目标地址等参数</p>
+                <p>健康检查与代理 Key 管理</p>
             </div>
             <div class="main-body">
                 <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">代理配置</div>
-                        <div class="card-description">设置上游 API 的 Base URL，保存后立即生效</div>
-                    </div>
-                    <div class="card-content">
-                        <div class="settings-group">
-                            <div class="field-group">
-                                <label for="settingBaseUrl">Base URL</label>
-                                <input type="text" id="settingBaseUrl" placeholder="https://api.xiaomimimo.com">
-                                <div class="field-hint">Chat Completions 端点将自动拼接为 <code>{base_url}/v1/chat/completions</code></div>
-                            </div>
-                            <div class="field-actions">
-                                <button class="btn btn-primary" onclick="saveSettings()">保存</button>
-                                <span class="status-msg" id="settingsStatus"></span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="card" style="margin-top:1.25rem;">
                     <div class="card-header">
                         <div class="card-title">健康检查</div>
                         <div class="card-description">测试所有启用的 Key，连续失败指定次数后自动禁用</div>
@@ -468,7 +499,7 @@
                     <div class="card-header">
                         <div style="display:flex;justify-content:space-between;align-items:center;">
                             <div class="card-title">代理 Key（sk-xxx）</div>
-                            <button class="btn btn-primary btn-sm" onclick="generateProxyKey()">
+                            <button class="btn btn-primary btn-sm" onclick="openGenProxyKeyModal()">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
                                 生成
                             </button>
@@ -516,6 +547,10 @@
             </div>
             <div class="modal-body">
                 <div class="field-group">
+                    <label for="addKeyChannel">渠道</label>
+                    <select id="addKeyChannel" style="width:100%;"></select>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
                     <label for="addKeyInput">API Key</label>
                     <input type="text" id="addKeyInput" placeholder="sk-..." style="width:100%;">
                 </div>
@@ -532,6 +567,38 @@
         </div>
     </div>
 
+    <!-- ===== Add Channel Modal ===== -->
+    <div class="modal-overlay" id="addChannelModal">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">添加渠道</div>
+                <button class="modal-close" onclick="closeAddChannelModal()" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="chEditId">
+                <div class="field-group">
+                    <label>渠道名称</label>
+                    <input type="text" id="chName" placeholder="例如：MiMo 主力" style="width:100%;">
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>路由前缀 <span style="color:hsl(0 84.2% 60.2%)">*</span></label>
+                    <input type="text" id="chPrefix" placeholder="例如：mimo" style="width:100%;" required>
+                    <div class="field-hint">必填。客户端通过 <code>/c/{前缀}/v1/chat/completions</code> 访问此渠道</div>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>Base URL</label>
+                    <input type="text" id="chBaseURL" placeholder="https://api.xiaomimimo.com/v1/chat/completions" style="width:100%;">
+                </div>
+                <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
+                    <button class="btn btn-outline" onclick="closeAddChannelModal()" style="flex:1;">取消</button>
+                    <button class="btn btn-primary" onclick="submitAddChannel()" style="flex:1;">添加</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== Log Detail Modal ===== -->
     <div class="modal-overlay" id="logDetailModal">
         <div class="modal" style="max-width:48rem;" onclick="event.stopPropagation()">
@@ -542,6 +609,30 @@
                 </button>
             </div>
             <div class="modal-body" id="logDetailBody" style="max-height:70vh;overflow-y:auto;"></div>
+        </div>
+    </div>
+
+    <!-- ===== Generate Proxy Key Modal ===== -->
+    <div class="modal-overlay" id="genProxyKeyModal">
+        <div class="modal" style="max-width:24rem;" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">生成代理 Key</div>
+                <button class="modal-close" onclick="closeGenProxyKeyModal()" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="field-group">
+                    <label>备注</label>
+                    <input type="text" id="genProxyKeyNote" placeholder="例如：张三的项目" style="width:100%;">
+                    <div class="field-hint">标识此 Key 的用途，方便管理</div>
+                </div>
+                <div id="genProxyKeyResult" style="margin-top:0.75rem;"></div>
+                <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
+                    <button class="btn btn-outline" onclick="closeGenProxyKeyModal()" style="flex:1;">关闭</button>
+                    <button class="btn btn-primary" id="genProxyKeySubmit" onclick="submitGenProxyKey()" style="flex:1;">生成</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -567,6 +658,9 @@
             logo:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>',
             toggleOn:   '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="15" cy="12" r="3"/><rect width="20" height="14" x="2" y="5" rx="7"/></g></svg>',
             toggleOff:  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="9" cy="12" r="3"/><rect width="20" height="14" x="2" y="5" rx="7"/></g></svg>',
+            pencil:     '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497zM15 5l4 4"/></svg>',
+            star:       '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679c.19.383.595.634 1.035.674l5.098.521a.53.53 0 0 1 .304.932l-3.834 3.33a1.31 1.31 0 0 0-.418 1.264l1.06 4.966a.53.53 0 0 1-.793.573L12.44 17.2a1.31 1.31 0 0 0-1.324 0L5.686 20.55a.53.53 0 0 1-.793-.573l1.06-4.966a1.31 1.31 0 0 0-.418-1.264l-3.834-3.33a.53.53 0 0 1 .304-.932l5.098-.521a1.31 1.31 0 0 0 1.035-.674z"/></svg>',
+            trash:      '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11v6m4-6v6m5-11v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
         };
 
         /* ========== Page Navigation ========== */
@@ -579,8 +673,10 @@
             if (page) page.classList.add('active');
             if (nav) nav.classList.add('active');
 
-            // Lazy-load settings when switching to settings page
-            if (name === 'settings') { loadSettings(); loadProxyKeys(); }
+            // Lazy-load when switching pages
+            if (name === 'settings') { loadProxyKeys(); }
+            if (name === 'channels') { loadChannels(); }
+            if (name === 'keys') { loadChannels().then(() => fetchKeys()); }
 
             // Auto-refresh logs when on logs page
             if (name === 'logs') { logsPage = 1; startLogsRefresh(); } else { stopLogsRefresh(); }
@@ -630,8 +726,8 @@
                     ? `<span class="badge badge-success"><span class="badge-dot"></span>启用</span>`
                     : `<span class="badge badge-warning"><span class="badge-dot"></span>禁用</span>`;
                 const toggle = k.enabled
-                    ? `<button class="btn btn-sm btn-warning-outline" onclick="toggleKey('${k.key}', ${k.enabled})">禁用</button>`
-                    : `<button class="btn btn-sm btn-success-outline" onclick="toggleKey('${k.key}', ${k.enabled})">启用</button>`;
+                    ? `<button class="btn btn-sm btn-ghost" data-tip="禁用" onclick="toggleKey('${k.key}', ${k.enabled})">${ICO.toggleOn}</button>`
+                    : `<button class="btn btn-sm btn-ghost" data-tip="启用" onclick="toggleKey('${k.key}', ${k.enabled})">${ICO.toggleOff}</button>`;
                 const noteDisplay = k.note
                     ? `<span class="td-note" title="${k.note}">${k.note}</span>`
                     : `<span class="td-note-empty" onclick="editNote('${k.key}','')">点击添加备注</span>`;
@@ -643,9 +739,9 @@
                     <td class="td-usage" style="font-weight:600;">${k.total_tokens.toLocaleString()}</td>
                     <td class="td-date">${formatDate(k.created_at)}</td>
                     <td class="td-actions"><div class="btn-group">
-                        <button class="btn btn-sm btn-outline" onclick="openTestModal('${k.key}')">测试</button>
+                        <button class="btn btn-sm btn-ghost" data-tip="测试" onclick="openTestModal('${k.key}', ${k.channel_id})">${ICO.play}</button>
                         ${toggle}
-                        <button class="btn btn-sm btn-destructive-ghost" onclick="removeKey('${k.key}')">删除</button>
+                        <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeKey('${k.key}')">${ICO.trash}</button>
                     </div></td>
                 </tr>`;
             }
@@ -656,9 +752,10 @@
 
         async function fetchKeys() {
             try {
-                const res = await fetch(API_BASE + '/keys');
+                const channelID = document.getElementById('channelFilter')?.value || '0';
+                const res = await fetch(API_BASE + '/keys?channel=' + channelID);
                 const data = await res.json();
-                document.getElementById('keysGrid').innerHTML = renderKeysTable(data.keys);
+                document.getElementById('keysGrid').innerHTML = renderKeysTable(data.keys || []);
             } catch (e) { console.error('fetchKeys:', e); }
         }
 
@@ -667,6 +764,11 @@
         function openAddKeyModal() {
             document.getElementById('addKeyInput').value = '';
             document.getElementById('addKeyNote').value = '';
+            // Populate channel selector
+            const sel = document.getElementById('addKeyChannel');
+            sel.innerHTML = allChannels.map(c => `<option value="${c.id}">${c.name || c.prefix || '渠道'+c.id}</option>`).join('');
+            const filterVal = document.getElementById('channelFilter')?.value;
+            if (filterVal && filterVal !== '0') sel.value = filterVal;
             document.getElementById('addKeyModal').classList.add('open');
             setTimeout(() => document.getElementById('addKeyInput').focus(), 100);
         }
@@ -680,12 +782,13 @@
         async function submitAddKey() {
             const key = document.getElementById('addKeyInput').value.trim();
             const note = document.getElementById('addKeyNote').value.trim();
+            const channel_id = parseInt(document.getElementById('addKeyChannel').value) || 0;
             if (!key) { document.getElementById('addKeyInput').focus(); return; }
             try {
                 const res = await fetch(API_BASE + '/keys', {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({action:'add', key, note})
+                    body: JSON.stringify({action:'add', key, note, channel_id})
                 });
                 if (res.ok) {
                     closeAddKeyModal();
@@ -727,44 +830,6 @@
 
         /* ========== Settings Page ========== */
 
-        async function loadSettings() {
-            try {
-                const res = await fetch(API_BASE + '/settings');
-                const data = await res.json();
-                document.getElementById('settingBaseUrl').value = data.base_url || '';
-            } catch (e) { console.error('loadSettings:', e); }
-        }
-
-        async function saveSettings() {
-            const baseUrl = document.getElementById('settingBaseUrl').value.trim();
-            const status = document.getElementById('settingsStatus');
-            if (!baseUrl) {
-                status.textContent = '请输入 Base URL';
-                status.className = 'status-msg show error';
-                setTimeout(() => { status.className = 'status-msg'; }, 2500);
-                return;
-            }
-            try {
-                const res = await fetch(API_BASE + '/settings', {
-                    method: 'POST',
-                    headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({base_url: baseUrl})
-                });
-                if (res.ok) {
-                    status.textContent = '✓ 已保存';
-                    status.className = 'status-msg show';
-                    setTimeout(() => { status.className = 'status-msg'; }, 2500);
-                } else {
-                    status.textContent = '保存失败';
-                    status.className = 'status-msg show error';
-                    setTimeout(() => { status.className = 'status-msg'; }, 2500);
-                }
-            } catch (e) {
-                status.textContent = '保存失败: ' + e.message;
-                status.className = 'status-msg show error';
-                setTimeout(() => { status.className = 'status-msg'; }, 3000);
-            }
-        }
 
         /* ========== Proxy Keys ========== */
 
@@ -789,17 +854,17 @@
                     ? '<span class="badge badge-success"><span class="badge-dot"></span>启用</span>'
                     : '<span class="badge badge-warning"><span class="badge-dot"></span>禁用</span>';
                 const toggle = k.enabled
-                    ? `<button class="btn btn-sm btn-warning-outline" onclick="toggleProxyKey('${k.key}', false)">禁用</button>`
-                    : `<button class="btn btn-sm btn-success-outline" onclick="toggleProxyKey('${k.key}', true)">启用</button>`;
+                    ? `<button class="btn btn-sm btn-ghost" data-tip="禁用" onclick="toggleProxyKey('${k.key}', false)">${ICO.toggleOn}</button>`
+                    : `<button class="btn btn-sm btn-ghost" data-tip="启用" onclick="toggleProxyKey('${k.key}', true)">${ICO.toggleOff}</button>`;
                 rows += `<tr>
                     <td class="td-key" title="${k.key}" style="max-width:320px;">${k.key}</td>
                     <td>${k.note || '-'}</td>
                     <td>${badge}</td>
                     <td class="td-date">${formatDate(k.created_at)}</td>
                     <td class="td-actions"><div class="btn-group">
-                        <button class="btn btn-sm btn-outline" onclick="copyKey('${k.key}')">复制</button>
+                        <button class="btn btn-sm btn-ghost" data-tip="复制" onclick="copyKey('${k.key}')">${ICO.copy}</button>
                         ${toggle}
-                        <button class="btn btn-sm btn-destructive-ghost" onclick="removeProxyKey('${k.key}')">删除</button>
+                        <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeProxyKey('${k.key}')">${ICO.trash}</button>
                     </div></td>
                 </tr>`;
             }
@@ -808,9 +873,20 @@
             </tr></thead><tbody>${rows}</tbody></table></div>`;
         }
 
-        async function generateProxyKey() {
-            const note = prompt('备注（可选）：', '');
-            if (note === null) return;
+        function openGenProxyKeyModal() {
+            document.getElementById('genProxyKeyNote').value = '';
+            document.getElementById('genProxyKeyResult').innerHTML = '';
+            document.getElementById('genProxyKeySubmit').style.display = '';
+            document.getElementById('genProxyKeyModal').classList.add('open');
+            setTimeout(() => document.getElementById('genProxyKeyNote').focus(), 100);
+        }
+        function closeGenProxyKeyModal() {
+            document.getElementById('genProxyKeyModal').classList.remove('open');
+        }
+        document.getElementById('genProxyKeyModal').addEventListener('click', function(e) { if (e.target === this) closeGenProxyKeyModal(); });
+
+        async function submitGenProxyKey() {
+            const note = document.getElementById('genProxyKeyNote').value.trim();
             try {
                 const res = await fetch(API_BASE + '/proxy-keys', {
                     method: 'POST',
@@ -820,9 +896,16 @@
                 const data = await res.json();
                 if (data.key) {
                     await loadProxyKeys();
-                    showToast('已生成：' + data.key);
-                    // Copy to clipboard
-                    try { await navigator.clipboard.writeText(data.key); showToast('已复制到剪贴板'); } catch(_){}
+                    document.getElementById('genProxyKeySubmit').style.display = 'none';
+                    document.getElementById('genProxyKeyResult').innerHTML = `
+                        <div class="result-success-banner">${ICO.check}<span>已生成</span></div>
+                        <div style="margin-bottom:0.5rem;">
+                            <label style="font-size:0.8125rem;font-weight:500;margin-bottom:0.25rem;display:block;">Key</label>
+                            <div style="display:flex;gap:0.5rem;align-items:center;">
+                                <code style="flex:1;font-size:0.8125rem;background:hsl(var(--muted));padding:0.5rem 0.75rem;border-radius:var(--radius);word-break:break-all;">${data.key}</code>
+                                <button class="btn btn-sm btn-primary" onclick="navigator.clipboard.writeText('${data.key}').then(()=>showToast('已复制'))">复制</button>
+                            </div>
+                        </div>`;
                 }
             } catch (e) { alert('生成失败: ' + e); }
         }
@@ -976,6 +1059,137 @@
             return esc(str);
         }
 
+        /* ========== Channels ========== */
+
+        let allChannels = [];
+
+        async function loadChannels() {
+            try {
+                const res = await fetch(API_BASE + '/channels');
+                const data = await res.json();
+                allChannels = data.channels || [];
+                renderChannels(allChannels);
+                // Populate channel filter dropdown
+                const filter = document.getElementById('channelFilter');
+                if (filter) {
+                    const val = filter.value;
+                    filter.innerHTML = '<option value="0">全部渠道</option>' +
+                        allChannels.map(c => `<option value="${c.id}">${c.name || c.prefix || '渠道'+c.id}</option>`).join('');
+                    filter.value = val || '0';
+                }
+            } catch (e) { console.error('loadChannels:', e); }
+        }
+
+        function renderChannels(channels) {
+            const grid = document.getElementById('channelsGrid');
+            if (!channels || channels.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><p>暂无渠道</p><p class="empty-hint">添加渠道以配置上游 API</p></div>';
+                return;
+            }
+            let rows = '';
+            for (const c of channels) {
+                const badge = c.is_default
+                    ? '<span class="badge badge-success"><span class="badge-dot"></span>默认</span>'
+                    : (c.enabled ? '<span class="badge badge-success" style="opacity:0.5">启用</span>' : '<span class="badge badge-warning"><span class="badge-dot"></span>禁用</span>');
+                const toggle = c.enabled
+                    ? `<button class="btn btn-sm btn-ghost" data-tip="禁用" onclick="toggleChannel(${c.id}, false)">${ICO.toggleOn}</button>`
+                    : `<button class="btn btn-sm btn-ghost" data-tip="启用" onclick="toggleChannel(${c.id}, true)">${ICO.toggleOff}</button>`;
+                const defaultBtn = c.is_default ? '' : `<button class="btn btn-sm btn-ghost" data-tip="设为默认" onclick="setDefaultChannel(${c.id})">${ICO.star}</button>`;
+                const proxyUrl = location.origin + '/c/' + c.prefix + '/v1';
+                rows += `<tr>
+                    <td style="font-weight:500;">${c.name || '-'}</td>
+                    <td style="font-family:monospace;font-size:0.8125rem;"><code>/c/${c.prefix}</code></td>
+                    <td class="td-key" title="${c.base_url}" style="max-width:260px;">${c.base_url}</td>
+                    <td style="font-family:monospace;font-size:0.8125rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${proxyUrl}">${proxyUrl}</td>
+                    <td>${badge}</td>
+                    <td class="td-actions"><div class="btn-group">
+                        <button class="btn btn-sm btn-ghost" data-tip="复制代理URL" onclick="copyProxyUrl('${proxyUrl}')">${ICO.copy}</button>
+                        <button class="btn btn-sm btn-ghost" data-tip="编辑" onclick='openEditChannelModal(${JSON.stringify(c).replace(/'/g,"&#39;")})'>${ICO.pencil}</button>
+                        ${defaultBtn}
+                        ${toggle}
+                        <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeChannel(${c.id})">${ICO.trash}</button>
+                    </div></td>
+                </tr>`;
+            }
+            grid.innerHTML = `<div class="table-wrapper"><table><thead><tr>
+                <th>名称</th><th>前缀</th><th>上游 URL</th><th>代理 URL</th><th>状态</th><th style="text-align:right">操作</th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
+        }
+
+        function copyProxyUrl(url) {
+            navigator.clipboard.writeText(url).then(() => showToast('已复制: ' + url));
+        }
+
+        async function setDefaultChannel(id) {
+            await fetch(API_BASE + '/channels', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({action:'set-default', id})
+            });
+            await loadChannels();
+            showToast('已设为默认渠道');
+        }
+
+        function openAddChannelModal() {
+            document.getElementById('chName').value = '';
+            document.getElementById('chPrefix').value = '';
+            document.getElementById('chBaseURL').value = '';
+            document.getElementById('chEditId').value = '';
+            document.querySelector('#addChannelModal .modal-title').textContent = '添加渠道';
+            document.getElementById('addChannelModal').classList.add('open');
+        }
+
+        function openEditChannelModal(c) {
+            document.getElementById('chName').value = c.name || '';
+            document.getElementById('chPrefix').value = c.prefix || '';
+            document.getElementById('chBaseURL').value = c.base_url || '';
+            document.getElementById('chEditId').value = c.id;
+            document.querySelector('#addChannelModal .modal-title').textContent = '编辑渠道';
+            document.getElementById('addChannelModal').classList.add('open');
+        }
+
+        function closeAddChannelModal() {
+            document.getElementById('addChannelModal').classList.remove('open');
+        }
+        document.getElementById('addChannelModal').addEventListener('click', function(e) { if (e.target === this) closeAddChannelModal(); });
+
+        async function submitAddChannel() {
+            const name = document.getElementById('chName').value.trim();
+            const prefix = document.getElementById('chPrefix').value.trim();
+            const base_url = document.getElementById('chBaseURL').value.trim();
+            const editId = document.getElementById('chEditId').value;
+            if (!prefix) { document.getElementById('chPrefix').focus(); showToast('前缀不能为空', true); return; }
+            if (!base_url) { document.getElementById('chBaseURL').focus(); return; }
+            try {
+                const action = editId ? 'update' : 'add';
+                const body = {action, name, prefix, base_url};
+                if (editId) body.id = parseInt(editId);
+                await fetch(API_BASE + '/channels', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify(body)
+                });
+                closeAddChannelModal();
+                await loadChannels();
+                showToast(editId ? '渠道已更新' : '渠道已添加');
+            } catch (e) { alert('操作失败: ' + e); }
+        }
+
+        async function toggleChannel(id, enable) {
+            await fetch(API_BASE + '/channels', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({action: enable ? 'enable' : 'disable', id})
+            });
+            await loadChannels();
+        }
+
+        async function removeChannel(id) {
+            if (!confirm('确定删除此渠道？')) return;
+            await fetch(API_BASE + '/channels', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({action:'remove', id})
+            });
+            await loadChannels();
+        }
+
         /* ========== Health Check ========== */
 
         async function runHealthCheck() {
@@ -1044,7 +1258,8 @@
 
         /* ========== Test Key Modal ========== */
 
-        async function openTestModal(key) {
+        async function openTestModal(key, channelID) {
+            channelID = channelID || 0;
             const overlay = document.getElementById('testModal');
             document.getElementById('modalTitle').textContent = '测试 Key';
             document.getElementById('modalBody').innerHTML = `
@@ -1059,7 +1274,7 @@
             overlay.classList.add('open');
 
             try {
-                const res = await fetch(API_BASE + '/models?key=' + encodeURIComponent(key));
+                const res = await fetch(API_BASE + '/models?key=' + encodeURIComponent(key) + '&channel=' + channelID);
                 if (!res.ok) {
                     let msg = `获取模型失败 (HTTP ${res.status})`;
                     try { const e = await res.json(); if (e.error) msg = e.error.message || e.error; } catch(_){}
@@ -1081,7 +1296,7 @@
                         <label style="display:block;font-size:0.8125rem;font-weight:500;margin-bottom:0.375rem;">模型</label>
                         <select id="testModelSelect" style="width:100%;">${opts}</select>
                     </div>
-                    <button class="btn btn-primary btn-full" onclick="_runTest('${key}')">开始测试</button>`;
+                    <button class="btn btn-primary btn-full" onclick="_runTest('${key}', ${channelID})">开始测试</button>`;
             } catch (e) {
                 document.getElementById('modalBody').innerHTML = `
                     <div class="result-row" style="border:none;padding-bottom:0.75rem;">
@@ -1096,7 +1311,7 @@
                         <label style="display:block;font-size:0.8125rem;font-weight:500;margin-bottom:0.375rem;">模型（手动输入）</label>
                         <input type="text" id="testModelSelect" style="width:100%;" value="mimo-v2.5-pro" placeholder="输入模型名称">
                     </div>
-                    <button class="btn btn-primary btn-full" onclick="_runTest('${key}')">仍然测试</button>`;
+                    <button class="btn btn-primary btn-full" onclick="_runTest('${key}', ${channelID})">仍然测试</button>`;
             }
         }
 
@@ -1104,13 +1319,13 @@
         document.getElementById('testModal').addEventListener('click', closeTestModal);
         document.addEventListener('keydown', e => { if (e.key === 'Escape') closeTestModal(); });
 
-        async function _runTest(key) {
+        async function _runTest(key, channelID) {
             const model = document.getElementById('testModelSelect').value;
             const body = document.getElementById('modalBody');
             body.innerHTML = `<div class="loading"><div class="spinner"></div>正在测试 ${model} …</div>`;
             try {
                 const t0 = performance.now();
-                const res = await fetch(API_BASE + '/test-key', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key, model}) });
+                const res = await fetch(API_BASE + '/test-key', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key, model, channel_id: channelID||0}) });
                 if (!res.ok) {
                     let msg = `HTTP ${res.status}`;
                     try { const e = await res.json(); msg = e.error || e.message || msg; } catch(_){}

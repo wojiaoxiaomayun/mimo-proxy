@@ -39,19 +39,13 @@ var htmlEmbed embed.FS
 
 type Handler struct {
 	pool       *KeyPool
-	targetURL  string
-	urlMu      sync.RWMutex
 	keyFails   map[string]int // consecutive failures per key
 	keyFailsMu sync.RWMutex
 }
 
 func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
-	// Load saved baseUrl from settings, fall back to default.
-	savedURL := pool.GetSetting("base_url", defaultURL)
-
 	h := &Handler{
 		pool:     pool,
-		targetURL: savedURL,
 		keyFails: make(map[string]int),
 	}
 
@@ -60,10 +54,13 @@ func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	mux.HandleFunc("/ui", h.Index)
 	mux.HandleFunc("/v1/chat/completions", h.ChatCompletions)
 	mux.HandleFunc("/v1/models", h.V1Models)
+	mux.HandleFunc("/c/{channel}/v1/chat/completions", h.ChatCompletions)
+	mux.HandleFunc("/c/{channel}/v1/models", h.V1Models)
 	mux.HandleFunc("/stats", h.Stats)
 	mux.HandleFunc("/keys", h.Keys)
 	mux.HandleFunc("/test-key", h.TestKey)
 	mux.HandleFunc("/models", h.Models)
+	mux.HandleFunc("/channels", h.Channels)
 	mux.HandleFunc("/settings", h.Settings)
 	mux.HandleFunc("/health-check", h.HealthCheck)
 	mux.HandleFunc("/proxy-keys", h.ProxyKeys)
@@ -113,17 +110,19 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key, err := h.pool.GetKey()
+	channel, err := h.resolveChannel(r)
+	if err != nil {
+		http.Error(w, `{"error":{"message":"Channel not found","code":"404"}}`, http.StatusNotFound)
+		return
+	}
+
+	key, err := h.pool.GetKey(channel.ID)
 	if err != nil {
 		http.Error(w, "No API key available: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 
-	h.urlMu.RLock()
-	url := h.targetURL
-	h.urlMu.RUnlock()
-
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, channel.BaseURL, bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
@@ -255,7 +254,9 @@ func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		keys, err := h.pool.GetAll()
+		channelID := 0
+		fmt.Sscanf(r.URL.Query().Get("channel"), "%d", &channelID)
+		keys, err := h.pool.GetAll(channelID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -267,9 +268,10 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPost {
 		var req struct {
-			Action string `json:"action"`
-			Key    string `json:"key"`
-			Note   string `json:"note"`
+			Action    string `json:"action"`
+			Key       string `json:"key"`
+			Note      string `json:"note"`
+			ChannelID int    `json:"channel_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -279,7 +281,7 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 		var err error
 		switch req.Action {
 		case "add":
-			err = h.pool.Add(req.Key, req.Note)
+			err = h.pool.Add(req.Key, req.Note, req.ChannelID)
 		case "remove":
 			err = h.pool.Remove(req.Key)
 		case "enable":
@@ -313,19 +315,36 @@ func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Key   string `json:"key"`
-		Model string `json:"model"`
+		Key       string `json:"key"`
+		Model     string `json:"model"`
+		ChannelID int    `json:"channel_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Key == "" {
 		http.Error(w, "Missing or invalid key", http.StatusBadRequest)
 		return
 	}
 
+	// Resolve channel
+	var channel *ChannelInfo
+	if req.ChannelID > 0 {
+		channels, _ := h.pool.GetAllChannels()
+		for _, c := range channels {
+			if c.ID == req.ChannelID {
+				channel = &c
+				break
+			}
+		}
+	}
+	if channel == nil {
+		channel, _ = h.pool.GetDefaultChannel()
+	}
+	if channel == nil {
+		http.Error(w, `{"error":"No channel configured"}`, http.StatusInternalServerError)
+		return
+	}
+
 	start := time.Now()
-	h.urlMu.RLock()
-	url := h.targetURL
-	h.urlMu.RUnlock()
-	proxyReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(testPayload(req.Model)))
+	proxyReq, err := http.NewRequest(http.MethodPost, channel.BaseURL, bytes.NewReader(testPayload(req.Model)))
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
@@ -388,6 +407,25 @@ func (h *Handler) resetKeyFailures(key string) {
 	h.keyFailsMu.Unlock()
 }
 
+// resolveChannel extracts channel from URL path and returns it.
+// /c/{channel}/v1/... → uses specified channel
+// /v1/... → uses default channel
+func (h *Handler) resolveChannel(r *http.Request) (*ChannelInfo, error) {
+	if ch := r.PathValue("channel"); ch != "" {
+		return h.pool.GetChannelByPrefix(ch)
+	}
+	return h.pool.GetDefaultChannel()
+}
+
+// modelsURLFromBase derives /v1/models from a chat completions base URL.
+func modelsURLFromBase(baseURL string) string {
+	u, err := url.Parse(strings.TrimRight(baseURL, "/"))
+	if err != nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/v1/models"
+}
+
 // validateProxyAuth checks the client's Authorization header against proxy_keys.
 func (h *Handler) validateProxyAuth(r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
@@ -430,18 +468,6 @@ func extractModel(body []byte) string {
 	return m.Model
 }
 
-// modelsURL derives the /v1/models endpoint from the chat completions target URL.
-// e.g. https://api.xiaomimimo.com/v1/chat/completions → https://api.xiaomimimo.com/v1/models
-func (h *Handler) modelsURL() string {
-	h.urlMu.RLock()
-	defer h.urlMu.RUnlock()
-	u, err := url.Parse(strings.TrimRight(h.targetURL, "/"))
-	if err != nil {
-		return ""
-	}
-	return u.Scheme + "://" + u.Host + "/v1/models"
-}
-
 func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Only GET method is allowed", http.StatusMethodNotAllowed)
@@ -449,12 +475,34 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := r.URL.Query().Get("key")
+	channelID := 0
+	fmt.Sscanf(r.URL.Query().Get("channel"), "%d", &channelID)
+
 	if key == "" {
 		http.Error(w, "Missing key query parameter", http.StatusBadRequest)
 		return
 	}
 
-	req, err := http.NewRequest(http.MethodGet, h.modelsURL(), nil)
+	var modelsURL string
+	if channelID > 0 {
+		// Use specific channel
+		channels, _ := h.pool.GetAllChannels()
+		for _, c := range channels {
+			if c.ID == channelID {
+				modelsURL = modelsURLFromBase(c.BaseURL)
+				break
+			}
+		}
+	}
+	if modelsURL == "" {
+		// Default channel
+		ch, _ := h.pool.GetDefaultChannel()
+		if ch != nil {
+			modelsURL = modelsURLFromBase(ch.BaseURL)
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
@@ -492,14 +540,23 @@ func (h *Handler) V1Models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key, err := h.pool.GetKey()
+	channel, err := h.resolveChannel(r)
+	if err != nil {
+		http.Error(w, `{"error":{"message":"Channel not found","code":"404"}}`, http.StatusNotFound)
+		return
+	}
+
+	key, err := h.pool.GetKey(channel.ID)
 	if err != nil {
 		http.Error(w, `{"error":{"message":"No API key available: `+err.Error()+`","code":"503"}}`, http.StatusServiceUnavailable)
 		return
 	}
 
 	start := time.Now()
-	req, err := http.NewRequest(http.MethodGet, h.modelsURL(), nil)
+	// Derive models URL from channel base URL
+	modelsURL := modelsURLFromBase(channel.BaseURL)
+
+	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
 	if err != nil {
 		http.Error(w, `{"error":{"message":"Failed to create request","code":"500"}}`, http.StatusInternalServerError)
 		return
@@ -634,40 +691,68 @@ func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch r.Method {
 	case http.MethodGet:
-		h.urlMu.RLock()
-		url := h.targetURL
-		h.urlMu.RUnlock()
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"base_url": url,
-		})
-
-	case http.MethodPost:
-		var req struct {
-			BaseURL string `json:"base_url"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BaseURL == "" {
-			http.Error(w, `{"error":"Missing or invalid base_url"}`, http.StatusBadRequest)
-			return
-		}
-		// Persist to DB
-		if err := h.pool.SetSetting("base_url", req.BaseURL); err != nil {
+		channels, err := h.pool.GetAllChannels()
+		if err != nil {
 			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 			return
 		}
-		// Update runtime value
-		h.urlMu.Lock()
-		h.targetURL = req.BaseURL
-		h.urlMu.Unlock()
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "base_url": req.BaseURL})
+		json.NewEncoder(w).Encode(map[string]interface{}{"channels": channels})
+
+	case http.MethodPost:
+		var req struct {
+			Action string `json:"action"`
+			ID     int    `json:"id"`
+			Name   string `json:"name"`
+			Prefix string `json:"prefix"`
+			BaseURL string `json:"base_url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+			return
+		}
+
+		switch req.Action {
+		case "add":
+			if err := h.pool.AddChannel(req.Name, req.Prefix, req.BaseURL); err != nil {
+				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case "update":
+			if err := h.pool.UpdateChannel(req.ID, req.Name, req.Prefix, req.BaseURL); err != nil {
+				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case "remove":
+			h.pool.RemoveChannel(req.ID)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case "enable":
+			h.pool.EnableChannel(req.ID)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case "disable":
+			h.pool.DisableChannel(req.ID)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case "set-default":
+			h.pool.SetDefaultChannel(req.ID)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		default:
+			http.Error(w, `{"error":"Unknown action"}`, http.StatusBadRequest)
+		}
 
 	default:
 		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
 	}
+}
+
+func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{})
 }
 
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
@@ -684,7 +769,7 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		req.Threshold = 3
 	}
 
-	keys, err := h.pool.GetAll()
+	keys, err := h.pool.GetAll(0)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to get keys"}`, http.StatusInternalServerError)
 		return
@@ -723,7 +808,12 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 		for attempt := 0; attempt < req.Threshold; attempt++ {
 			start := time.Now()
-			testReq, err := http.NewRequest(http.MethodGet, h.modelsURL(), nil)
+			ch, _ := h.pool.GetDefaultChannel()
+			modelsURL := ""
+			if ch != nil {
+				modelsURL = modelsURLFromBase(ch.BaseURL)
+			}
+			testReq, err := http.NewRequest(http.MethodGet, modelsURL, nil)
 			if err != nil {
 				fails++
 				lastErr = "request build failed"
