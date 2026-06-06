@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "skills": {
+    "better-icons": {
+      "source": "better-auth/better-icons",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/better-auth/better-icons",
+      "computedHash": "b16a2f5830f3db40695fdd58d415a631e9fb6170a0cc5d3b56469d17e53596bc",
+      "remoteHash": "49c97e1227b9611b44248acd341c7f188582f937",
+      "skillPath": "skills/SKILL.md"
+    }
+  }
+}

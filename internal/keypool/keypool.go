@@ -1,6 +1,7 @@
 package keypool
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -10,11 +11,15 @@ import (
 )
 
 type KeyInfo struct {
-	ID         int    `json:"id"`
-	Key        string `json:"key"`
-	UsageCount int    `json:"usage_count"`
-	Enabled    bool   `json:"enabled"`
-	CreatedAt  string `json:"created_at"`
+	ID              int    `json:"id"`
+	Key             string `json:"key"`
+	Note            string `json:"note"`
+	UsageCount      int    `json:"usage_count"`
+	PromptTokens    int    `json:"prompt_tokens"`
+	CompletionTokens int   `json:"completion_tokens"`
+	TotalTokens     int    `json:"total_tokens"`
+	Enabled         bool   `json:"enabled"`
+	CreatedAt       string `json:"created_at"`
 }
 
 type KeyPool struct {
@@ -35,6 +40,64 @@ func New(dbPath string) (*KeyPool, error) {
 			usage_count INTEGER DEFAULT 0,
 			enabled INTEGER DEFAULT 1,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	// Migrate: add token columns if missing (existing DBs).
+	for _, col := range []string{
+		"ALTER TABLE api_keys ADD COLUMN prompt_tokens INTEGER DEFAULT 0",
+		"ALTER TABLE api_keys ADD COLUMN completion_tokens INTEGER DEFAULT 0",
+		"ALTER TABLE api_keys ADD COLUMN total_tokens INTEGER DEFAULT 0",
+		"ALTER TABLE api_keys ADD COLUMN note TEXT DEFAULT ''",
+		"ALTER TABLE request_logs ADD COLUMN request_body TEXT DEFAULT ''",
+		"ALTER TABLE request_logs ADD COLUMN response_body TEXT DEFAULT ''",
+	} {
+		db.Exec(col) // ignore duplicate-column errors
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS proxy_keys (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			key TEXT UNIQUE NOT NULL,
+			note TEXT DEFAULT '',
+			enabled INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS request_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			method TEXT,
+			path TEXT,
+			status_code INTEGER,
+			latency_ms INTEGER,
+			proxy_key TEXT,
+			upstream_key TEXT,
+			model TEXT,
+			prompt_tokens INTEGER DEFAULT 0,
+			completion_tokens INTEGER DEFAULT 0,
+			total_tokens INTEGER DEFAULT 0,
+			error TEXT DEFAULT '',
+			request_body TEXT DEFAULT '',
+			response_body TEXT DEFAULT ''
 		)
 	`)
 	if err != nil {
@@ -65,19 +128,24 @@ func (p *KeyPool) GetKey() (string, error) {
 	return key, nil
 }
 
-func (p *KeyPool) IncrementUsage(key string) error {
+func (p *KeyPool) IncrementUsage(key string, promptTokens, completionTokens, totalTokens int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	_, err := p.db.Exec(`
-		UPDATE api_keys SET usage_count = usage_count + 1 WHERE key = ?
-	`, key)
+		UPDATE api_keys SET
+			usage_count = usage_count + 1,
+			prompt_tokens = prompt_tokens + ?,
+			completion_tokens = completion_tokens + ?,
+			total_tokens = total_tokens + ?
+		WHERE key = ?
+	`, promptTokens, completionTokens, totalTokens, key)
 	return err
 }
 
-func (p *KeyPool) Add(key string) error {
+func (p *KeyPool) Add(key, note string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, err := p.db.Exec(`INSERT OR IGNORE INTO api_keys (key) VALUES (?)`, key)
+	_, err := p.db.Exec(`INSERT OR IGNORE INTO api_keys (key, note) VALUES (?, ?)`, key, note)
 	return err
 }
 
@@ -102,12 +170,19 @@ func (p *KeyPool) Enable(key string) error {
 	return err
 }
 
+func (p *KeyPool) UpdateNote(key, note string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE api_keys SET note = ? WHERE key = ?`, note, key)
+	return err
+}
+
 func (p *KeyPool) GetAll() ([]KeyInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
 	rows, err := p.db.Query(`
-		SELECT id, key, usage_count, enabled, created_at FROM api_keys ORDER BY id
+		SELECT id, key, note, usage_count, prompt_tokens, completion_tokens, total_tokens, enabled, created_at FROM api_keys ORDER BY id
 	`)
 	if err != nil {
 		return nil, err
@@ -117,7 +192,7 @@ func (p *KeyPool) GetAll() ([]KeyInfo, error) {
 	var keys []KeyInfo
 	for rows.Next() {
 		var k KeyInfo
-		if err := rows.Scan(&k.ID, &k.Key, &k.UsageCount, &k.Enabled, &k.CreatedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.Key, &k.Note, &k.UsageCount, &k.PromptTokens, &k.CompletionTokens, &k.TotalTokens, &k.Enabled, &k.CreatedAt); err != nil {
 			return nil, err
 		}
 		keys = append(keys, k)
@@ -125,11 +200,16 @@ func (p *KeyPool) GetAll() ([]KeyInfo, error) {
 	return keys, nil
 }
 
-func (p *KeyPool) GetStats() (totalRequests int64, enabledCount, disabledCount int, err error) {
+func (p *KeyPool) GetStats() (totalTokens int64, totalCalls int64, enabledCount, disabledCount int, err error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	err = p.db.QueryRow(`SELECT COALESCE(SUM(usage_count), 0) FROM api_keys`).Scan(&totalRequests)
+	err = p.db.QueryRow(`SELECT COALESCE(SUM(total_tokens), 0) FROM api_keys`).Scan(&totalTokens)
+	if err != nil {
+		return
+	}
+
+	err = p.db.QueryRow(`SELECT COALESCE(SUM(usage_count), 0) FROM api_keys`).Scan(&totalCalls)
 	if err != nil {
 		return
 	}
@@ -148,7 +228,7 @@ func (p *KeyPool) LoadFromEnv(keysStr string) error {
 	for _, key := range keys {
 		key = strings.TrimSpace(key)
 		if key != "" {
-			if err := p.Add(key); err != nil {
+			if err := p.Add(key, ""); err != nil {
 				return err
 			}
 		}
@@ -159,3 +239,178 @@ func (p *KeyPool) LoadFromEnv(keysStr string) error {
 func (p *KeyPool) Close() error {
 	return p.db.Close()
 }
+
+// ============ Proxy Keys (sk-xxx) ============
+
+type ProxyKeyInfo struct {
+	ID        int    `json:"id"`
+	Key       string `json:"key"`
+	Note      string `json:"note"`
+	Enabled   bool   `json:"enabled"`
+	CreatedAt string `json:"created_at"`
+}
+
+// GenerateProxyKey creates a new random sk-xxx key and stores it.
+func (p *KeyPool) GenerateProxyKey(note string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	b := make([]byte, 24)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate random key: %w", err)
+	}
+	key := fmt.Sprintf("sk-%x", b)
+	_, err = p.db.Exec(`INSERT INTO proxy_keys (key, note) VALUES (?, ?)`, key, note)
+	return key, err
+}
+
+func (p *KeyPool) ValidateProxyKey(key string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var enabled bool
+	err := p.db.QueryRow(`SELECT enabled FROM proxy_keys WHERE key = ?`, key).Scan(&enabled)
+	return err == nil && enabled
+}
+
+func (p *KeyPool) GetAllProxyKeys() ([]ProxyKeyInfo, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	rows, err := p.db.Query(`SELECT id, key, note, enabled, created_at FROM proxy_keys ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []ProxyKeyInfo
+	for rows.Next() {
+		var k ProxyKeyInfo
+		if err := rows.Scan(&k.ID, &k.Key, &k.Note, &k.Enabled, &k.CreatedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+func (p *KeyPool) RemoveProxyKey(key string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`DELETE FROM proxy_keys WHERE key = ?`, key)
+	return err
+}
+
+func (p *KeyPool) EnableProxyKey(key string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE proxy_keys SET enabled = 1 WHERE key = ?`, key)
+	return err
+}
+
+func (p *KeyPool) DisableProxyKey(key string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE proxy_keys SET enabled = 0 WHERE key = ?`, key)
+	return err
+}
+
+// ============ Request Logs ============
+
+type RequestLog struct {
+	ID               int    `json:"id"`
+	CreatedAt        string `json:"created_at"`
+	Method           string `json:"method"`
+	Path             string `json:"path"`
+	StatusCode       int    `json:"status_code"`
+	LatencyMs        int64  `json:"latency_ms"`
+	ProxyKey         string `json:"proxy_key"`
+	UpstreamKey      string `json:"upstream_key"`
+	Model            string `json:"model"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	Error            string `json:"error"`
+	RequestBody      string `json:"request_body,omitempty"`
+	ResponseBody     string `json:"response_body,omitempty"`
+}
+
+func (p *KeyPool) LogRequest(l *RequestLog) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.db.Exec(`INSERT INTO request_logs
+		(method, path, status_code, latency_ms, proxy_key, upstream_key, model, prompt_tokens, completion_tokens, total_tokens, error, request_body, response_body)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		l.Method, l.Path, l.StatusCode, l.LatencyMs, l.ProxyKey, l.UpstreamKey, l.Model,
+		l.PromptTokens, l.CompletionTokens, l.TotalTokens, l.Error, l.RequestBody, l.ResponseBody)
+}
+
+func (p *KeyPool) GetLogs(page, pageSize int) ([]RequestLog, int, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	offset := (page - 1) * pageSize
+
+	var total int
+	p.db.QueryRow(`SELECT COUNT(*) FROM request_logs`).Scan(&total)
+
+	rows, err := p.db.Query(`SELECT id, created_at, method, path, status_code, latency_ms, proxy_key, upstream_key, model, prompt_tokens, completion_tokens, total_tokens, error FROM request_logs ORDER BY id DESC LIMIT ? OFFSET ?`, pageSize, offset)
+	if err != nil {
+		return nil, total, err
+	}
+	defer rows.Close()
+	var logs []RequestLog
+	for rows.Next() {
+		var l RequestLog
+		if err := rows.Scan(&l.ID, &l.CreatedAt, &l.Method, &l.Path, &l.StatusCode, &l.LatencyMs, &l.ProxyKey, &l.UpstreamKey, &l.Model, &l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Error); err != nil {
+			return nil, total, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, total, nil
+}
+
+func (p *KeyPool) CleanLogs() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.db.Exec(`DELETE FROM request_logs WHERE created_at < datetime('now', '-1 hour')`)
+}
+
+func (p *KeyPool) GetLogDetail(id int) (*RequestLog, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var l RequestLog
+	err := p.db.QueryRow(`SELECT id, created_at, method, path, status_code, latency_ms, proxy_key, upstream_key, model, prompt_tokens, completion_tokens, total_tokens, error, request_body, response_body FROM request_logs WHERE id = ?`, id).Scan(
+		&l.ID, &l.CreatedAt, &l.Method, &l.Path, &l.StatusCode, &l.LatencyMs, &l.ProxyKey, &l.UpstreamKey, &l.Model, &l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Error, &l.RequestBody, &l.ResponseBody)
+	if err != nil {
+		return nil, err
+	}
+	return &l, nil
+}
+
+// ============ Settings ============
+// Silently ignores errors (e.g. table not yet created).
+func (p *KeyPool) GetSetting(key, defaultValue string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var val string
+	err := p.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&val)
+	if err != nil {
+		return defaultValue
+	}
+	if val == "" {
+		return defaultValue
+	}
+	return val
+}
+
+// SetSetting upserts a setting value.
+func (p *KeyPool) SetSetting(key, value string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+

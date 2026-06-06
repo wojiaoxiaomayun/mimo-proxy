@@ -3,406 +3,1184 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MiMo Key 管理</title>
+    <title>MiMo Proxy</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        /* ===== CSS Variables (shadcn tokens) ===== */
+        :root {
+            --background: 0 0% 100%;
+            --foreground: 240 10% 3.9%;
+            --card: 0 0% 100%;
+            --card-foreground: 240 10% 3.9%;
+            --primary: 240 5.9% 10%;
+            --primary-foreground: 0 0% 98%;
+            --muted: 240 4.8% 95.9%;
+            --muted-foreground: 240 3.8% 46.1%;
+            --accent: 240 4.8% 95.9%;
+            --accent-foreground: 240 5.9% 10%;
+            --destructive: 0 84.2% 60.2%;
+            --border: 240 5.9% 90%;
+            --input: 240 5.9% 90%;
+            --ring: 240 5.9% 10%;
+            --radius: 0.5rem;
         }
+
+        /* ===== Reset ===== */
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; border-color: hsl(var(--border)); }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
-            padding: 20px;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        h1 {
-            color: #333;
-            margin-bottom: 20px;
-        }
-        .card {
-            background: #fff;
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-        }
-        .stat-item {
-            text-align: center;
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 10px;
-            color: #fff;
-        }
-        .stat-item:nth-child(2) {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        }
-        .stat-item:nth-child(3) {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        }
-        .stat-value {
-            font-size: 32px;
-            font-weight: bold;
-        }
-        .stat-label {
-            opacity: 0.9;
-            margin-top: 5px;
-            font-size: 14px;
-        }
-        .section-header {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: hsl(var(--background));
+            color: hsl(var(--foreground));
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
+            min-height: 100vh;
         }
-        .section-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #333;
-        }
-        .add-form {
+
+        /* ===== Sidebar ===== */
+        .sidebar {
+            width: 240px;
+            min-height: 100vh;
+            background: hsl(var(--card));
+            border-right: 1px solid hsl(var(--border));
             display: flex;
-            gap: 10px;
+            flex-direction: column;
+            flex-shrink: 0;
+            position: sticky;
+            top: 0;
         }
-        .add-form input {
-            width: 300px;
-            padding: 10px 16px;
-            border: 1px solid #e8e8e8;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.3s;
+        .sidebar-header {
+            padding: 1.25rem 1.25rem 1rem;
+            border-bottom: 1px solid hsl(var(--border));
         }
-        .add-form input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        .btn-add {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #fff;
-            padding: 10px 24px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .btn-add:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        }
-        .keys-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 16px;
-        }
-        .key-card {
-            background: #fff;
-            border: 1px solid #f0f0f0;
-            border-radius: 12px;
-            padding: 20px;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .key-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        .key-card.disabled {
-            opacity: 0.6;
-            background: #fafafa;
-        }
-        .key-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 16px;
-        }
-        .key-icon {
-            width: 48px;
-            height: 48px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 10px;
+        .sidebar-brand {
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
             display: flex;
             align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-size: 20px;
-            font-weight: bold;
+            gap: 0.5rem;
         }
-        .key-card.disabled .key-icon {
-            background: #ccc;
-        }
-        .status-badge {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        .status-enabled {
-            background: #e6f7ed;
-            color: #52c41a;
-        }
-        .status-disabled {
-            background: #fff1e6;
-            color: #fa8c16;
-        }
-        .key-info {
-            margin-bottom: 16px;
-        }
-        .key-value {
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 14px;
-            color: #333;
-            background: #f8f9fa;
-            padding: 10px 12px;
-            border-radius: 6px;
-            word-break: break-all;
-            margin-bottom: 8px;
-        }
-        .key-meta {
-            display: flex;
-            gap: 20px;
-            font-size: 13px;
-            color: #999;
-        }
-        .key-actions {
-            display: flex;
-            gap: 8px;
-        }
-        .btn-enable, .btn-disable, .btn-remove {
+        .sidebar-brand svg { color: hsl(var(--foreground)); }
+        .sidebar-nav {
+            padding: 0.75rem;
             flex: 1;
-            padding: 8px 12px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.125rem;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.625rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: var(--radius);
+            font-size: 0.875rem;
             font-weight: 500;
-            transition: all 0.2s;
+            color: hsl(var(--muted-foreground));
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            text-decoration: none;
+            user-select: none;
         }
-        .btn-enable {
-            background: #e6f7ed;
-            color: #52c41a;
+        .nav-item:hover {
+            background: hsl(var(--accent));
+            color: hsl(var(--accent-foreground));
         }
-        .btn-enable:hover {
-            background: #b7eb8f;
+        .nav-item.active {
+            background: hsl(var(--accent));
+            color: hsl(var(--foreground));
+            font-weight: 600;
         }
-        .btn-disable {
-            background: #fff1e6;
-            color: #fa8c16;
+        .nav-item svg { flex-shrink: 0; }
+        .sidebar-footer {
+            padding: 1rem 1.25rem;
+            border-top: 1px solid hsl(var(--border));
+            font-size: 0.75rem;
+            color: hsl(var(--muted-foreground));
         }
-        .btn-disable:hover {
-            background: #ffd591;
+
+        /* ===== Main ===== */
+        .main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
         }
-        .btn-remove {
-            background: #fff1f0;
-            color: #ff4d4f;
+        .main-header {
+            padding: 1.25rem 2rem;
+            border-bottom: 1px solid hsl(var(--border));
+            background: hsl(var(--card));
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
-        .btn-remove:hover {
-            background: #ffccc7;
+        .main-header h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
         }
-        .refresh-time {
-            color: #999;
-            font-size: 12px;
-            margin-top: 20px;
-            text-align: center;
+        .main-header p {
+            font-size: 0.8125rem;
+            color: hsl(var(--muted-foreground));
+            margin-top: 0.125rem;
         }
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #999;
+        .main-body {
+            padding: 1.5rem 2rem 2rem;
+            flex: 1;
         }
-        .empty-state-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
+
+        /* ===== Page Visibility ===== */
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* ===== Card ===== */
+        .card {
+            background: hsl(var(--card));
+            border: 1px solid hsl(var(--border));
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        .card-header { padding: 1.25rem 1.25rem 0; }
+        .card-title { font-size: 0.9375rem; font-weight: 600; letter-spacing: -0.01em; }
+        .card-description { font-size: 0.8125rem; color: hsl(var(--muted-foreground)); margin-top: 0.25rem; }
+        .card-content { padding: 1.25rem; }
+
+        /* ===== Stats Grid ===== */
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1.25rem; }
+        .stat-card {
+            border: 1px solid hsl(var(--border));
+            border-radius: var(--radius);
+            padding: 1rem 1.25rem;
+        }
+        .stat-label { font-size: 0.8125rem; font-weight: 500; color: hsl(var(--muted-foreground)); margin-bottom: 0.25rem; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1.2; }
+
+        /* ===== Add Form ===== */
+        .add-form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+
+        /* ===== Input / Select ===== */
+        input[type="text"], select, textarea {
+            flex: 1; height: 2.25rem; padding: 0 0.75rem; font-size: 0.875rem;
+            border: 1px solid hsl(var(--input)); border-radius: var(--radius);
+            background: hsl(var(--background)); color: hsl(var(--foreground));
+            outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+            font-family: inherit;
+        }
+        textarea { height: auto; padding: 0.5rem 0.75rem; resize: vertical; line-height: 1.5; }
+        input[type="text"]::placeholder, textarea::placeholder { color: hsl(var(--muted-foreground)); }
+        input[type="text"]:focus, select:focus, textarea:focus {
+            border-color: hsl(var(--ring));
+            box-shadow: 0 0 0 2px hsl(var(--ring) / 0.15);
+        }
+        select {
+            cursor: pointer; -webkit-appearance: none; -moz-appearance: none; appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 0.75rem center; padding-right: 2rem;
+        }
+
+        /* ===== Buttons ===== */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            height: 2.25rem; padding: 0 1rem; font-size: 0.875rem; font-weight: 500;
+            border-radius: var(--radius); border: 1px solid transparent;
+            cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+            white-space: nowrap; line-height: 1;
+        }
+        .btn:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring)); }
+        .btn:active { transform: scale(0.98); }
+        .btn-primary { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-outline { background: transparent; border-color: hsl(var(--border)); color: hsl(var(--foreground)); }
+        .btn-outline:hover { background: hsl(var(--accent)); }
+        .btn-destructive-ghost { background: transparent; color: hsl(var(--destructive)); }
+        .btn-destructive-ghost:hover { background: hsl(0 84.2% 60.2% / 0.08); }
+        .btn-success-outline { background: transparent; border-color: hsl(142 76% 36%); color: hsl(142 76% 36%); }
+        .btn-success-outline:hover { background: hsl(142 76% 36% / 0.08); }
+        .btn-warning-outline { background: transparent; border-color: hsl(38 92% 50%); color: hsl(38 92% 40%); }
+        .btn-warning-outline:hover { background: hsl(38 92% 50% / 0.08); }
+        .btn-sm { height: 2rem; padding: 0 0.75rem; font-size: 0.8125rem; }
+        .btn-full { flex: 1; width: 100%; }
+        .btn-ghost { background: transparent; color: hsl(var(--muted-foreground)); }
+        .btn-ghost:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+
+        /* ===== Table ===== */
+        .table-wrapper { border: 1px solid hsl(var(--border)); border-radius: var(--radius); overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+        thead { background: hsl(var(--muted)); }
+        th { padding: 0.625rem 1rem; text-align: left; font-weight: 500; color: hsl(var(--muted-foreground)); font-size: 0.8125rem; }
+        td { padding: 0.75rem 1rem; border-top: 1px solid hsl(var(--border)); vertical-align: middle; }
+        tr:hover td { background: hsl(var(--muted) / 0.5); }
+        .td-key { font-family: 'SF Mono','Monaco','Menlo','Consolas',monospace; font-size: 0.8125rem; color: hsl(var(--muted-foreground)); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .td-note { font-size: 0.8125rem; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+        .td-note:hover { color: hsl(var(--foreground)); text-decoration: underline; }
+        .td-note-empty { font-size: 0.75rem; color: hsl(var(--muted-foreground)); opacity: 0.5; cursor: pointer; font-style: italic; }
+        .td-note-empty:hover { opacity: 1; text-decoration: underline; }
+        .td-usage { font-variant-numeric: tabular-nums; font-weight: 500; }
+        .td-date { color: hsl(var(--muted-foreground)); font-size: 0.8125rem; }
+        .td-actions { text-align: right; }
+        .btn-group { display: inline-flex; gap: 0.375rem; }
+
+        /* ===== Badge ===== */
+        .badge { display: inline-flex; align-items: center; height: 1.375rem; padding: 0 0.5rem; font-size: 0.6875rem; font-weight: 600; border-radius: 9999px; text-transform: uppercase; }
+        .badge-success { background: hsl(142 76% 36% / 0.1); color: hsl(142 76% 36%); }
+        .badge-warning { background: hsl(38 92% 50% / 0.1); color: hsl(38 92% 40%); }
+        .badge-dot { width: 6px; height: 6px; border-radius: 50%; margin-right: 0.375rem; }
+        .badge-success .badge-dot { background: hsl(142 76% 36%); }
+        .badge-warning .badge-dot { background: hsl(38 92% 50%); }
+
+        /* ===== Empty State ===== */
+        .empty-state { text-align: center; padding: 2.5rem 1rem; color: hsl(var(--muted-foreground)); }
+        .empty-state svg { width: 2.5rem; height: 2.5rem; margin: 0 auto 0.5rem; color: hsl(var(--border)); }
+        .empty-state p { font-size: 0.875rem; }
+        .empty-state .empty-hint { font-size: 0.8125rem; margin-top: 0.25rem; opacity: 0.7; }
+
+        /* ===== Settings Page ===== */
+        .settings-group { max-width: 32rem; }
+        .field-group { margin-bottom: 1.25rem; }
+        .field-group label { display: block; font-size: 0.8125rem; font-weight: 500; margin-bottom: 0.375rem; }
+        .field-group .field-hint { font-size: 0.75rem; color: hsl(var(--muted-foreground)); margin-top: 0.375rem; }
+        .field-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 1.5rem; }
+        .status-msg { font-size: 0.8125rem; color: hsl(142 76% 36%); font-weight: 500; opacity: 0; transition: opacity 0.3s; }
+        .status-msg.show { opacity: 1; }
+        .status-msg.error { color: hsl(var(--destructive)); }
+
+        /* ===== Separator ===== */
+        .separator { height: 1px; background: hsl(var(--border)); margin: 1.25rem 0; }
+
+        /* ===== Modal ===== */
+        .modal-overlay {
+            position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.5); opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s;
+        }
+        .modal-overlay.open { opacity: 1; visibility: visible; }
+        .modal {
+            position: relative; width: 90%; max-width: 28rem; max-height: 85vh; overflow-y: auto;
+            background: hsl(var(--background)); border: 1px solid hsl(var(--border)); border-radius: var(--radius);
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); transform: scale(0.95); transition: transform 0.2s;
+        }
+        .modal-overlay.open .modal { transform: scale(1); }
+        .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 1.25rem 1.5rem 0; }
+        .modal-title { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; }
+        .modal-close {
+            display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem;
+            border-radius: var(--radius); border: none; background: transparent;
+            color: hsl(var(--muted-foreground)); cursor: pointer; transition: background 0.15s, color 0.15s;
+        }
+        .modal-close:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+        .modal-body { padding: 1.25rem 1.5rem 1.5rem; }
+
+        /* ===== Loading / Spinner ===== */
+        .loading { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 2rem 0; color: hsl(var(--muted-foreground)); font-size: 0.875rem; }
+        .spinner { width: 1.75rem; height: 1.75rem; border: 2.5px solid hsl(var(--border)); border-top-color: hsl(var(--foreground)); border-radius: 50%; animation: spin 0.7s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ===== Result Rows ===== */
+        .result-row { display: flex; align-items: baseline; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid hsl(var(--border)); font-size: 0.875rem; }
+        .result-row:last-child { border-bottom: none; }
+        .result-label { color: hsl(var(--muted-foreground)); font-size: 0.8125rem; flex-shrink: 0; }
+        .result-value { font-weight: 500; text-align: right; word-break: break-all; margin-left: 1rem; }
+        .result-success-banner, .result-error-banner {
+            display: flex; align-items: center; gap: 0.625rem; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: var(--radius);
+        }
+        .result-success-banner { border: 1px solid hsl(142 76% 36% / 0.2); background: hsl(142 76% 36% / 0.06); }
+        .result-error-banner { border: 1px solid hsl(0 84.2% 60.2% / 0.2); background: hsl(0 84.2% 60.2% / 0.06); font-size: 0.8125rem; color: hsl(0 84.2% 40%); align-items: flex-start; }
+        .result-icon { flex-shrink: 0; width: 1.25rem; height: 1.25rem; }
+        .result-success-banner .result-icon { color: hsl(142 76% 36%); }
+        .result-error-banner .result-icon { color: hsl(0 84.2% 60.2%); }
+        .result-success-banner span { font-weight: 600; font-size: 0.875rem; color: hsl(142 76% 30%); }
+
+        /* ===== Pagination ===== */
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 0.75rem;
+            font-size: 0.8125rem;
+        }
+        .pagination-info { color: hsl(var(--muted-foreground)); }
+        .pagination-btns { display: flex; gap: 0.375rem; }
+        .btn[disabled] { opacity: 0.4; pointer-events: none; }
+
+        /* ===== Code Block ===== */
+        .code-block {
+            background: hsl(240 10% 3.9%);
+            color: hsl(0 0% 85%);
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius);
+            font-family: 'SF Mono','Monaco','Menlo','Consolas',monospace;
+            font-size: 0.8125rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 20rem;
+            overflow-y: auto;
+        }
+
+        /* ===== Toast ===== */
+        .toast {
+            position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(120%); z-index: 100;
+            padding: 0.625rem 1rem; border-radius: var(--radius); border: 1px solid hsl(var(--border));
+            background: hsl(var(--foreground)); color: hsl(var(--background)); font-size: 0.8125rem; font-weight: 500;
+            opacity: 0; transition: transform 0.25s ease, opacity 0.25s ease; pointer-events: none; white-space: nowrap;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+        .toast.error { background: hsl(0 84.2% 60.2%); border-color: hsl(0 84.2% 50%); color: #fff; }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .sidebar { width: 100%; min-height: auto; position: static; flex-direction: row; border-right: none; border-bottom: 1px solid hsl(var(--border)); }
+            .sidebar-header { padding: 0.75rem 1rem; border-bottom: none; }
+            .sidebar-nav { flex-direction: row; padding: 0 0.5rem; gap: 0.25rem; }
+            .sidebar-footer { display: none; }
+            .main-header, .main-body { padding-left: 1rem; padding-right: 1rem; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .add-form { flex-direction: column; }
+            .table-wrapper { overflow-x: auto; }
+            table { min-width: 780px; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>MiMo Key 管理</h1>
-        
-        <div class="card">
-            <div class="stats">
-                <div class="stat-item">
-                    <div class="stat-value" id="proxyRequests">-</div>
-                    <div class="stat-label">代理请求</div>
+
+    <!-- ===== Sidebar ===== -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-brand">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>
+                MiMo Proxy
+            </div>
+        </div>
+        <nav class="sidebar-nav">
+            <a class="nav-item active" data-page="keys" onclick="switchPage('keys')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>
+                Key 管理
+            </a>
+            <a class="nav-item" data-page="logs" onclick="switchPage('logs')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 12h-5m5-4h-5m9 9V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></g></svg>
+                日志
+            </a>
+            <a class="nav-item" data-page="settings" onclick="switchPage('settings')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0a2.34 2.34 0 0 0 3.319 1.915a2.34 2.34 0 0 1 2.33 4.033a2.34 2.34 0 0 0 0 3.831a2.34 2.34 0 0 1-2.33 4.033a2.34 2.34 0 0 0-3.319 1.915a2.34 2.34 0 0 1-4.659 0a2.34 2.34 0 0 0-3.32-1.915a2.34 2.34 0 0 1-2.33-4.033a2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g></svg>
+                设置
+            </a>
+        </nav>
+        <div class="sidebar-footer">MiMo Key Pool Proxy</div>
+    </aside>
+
+    <!-- ===== Main Content ===== -->
+    <div class="main">
+
+        <!-- === Keys Page === -->
+        <div class="page active" id="page-keys">
+            <div class="main-header">
+                <h1>Key 管理</h1>
+                <p>管理 API Key 池，监控代理请求与用量</p>
+            </div>
+            <div class="main-body">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">总调用</div>
+                        <div class="stat-value" id="totalCalls">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">总 Tokens</div>
+                        <div class="stat-value" id="totalTokens">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Key 数量</div>
+                        <div class="stat-value" id="keyCount">-</div>
+                    </div>
                 </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="totalUsage">-</div>
-                    <div class="stat-label">总用量</div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <div class="card-title">API Keys</div>
+                            <button class="btn btn-primary btn-sm" onclick="openAddKeyModal()">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
+                                添加 Key
+                            </button>
+                        </div>
+                        <div class="card-description" style="margin-top:0.5rem;">管理 API Key，每个 Key 可添加备注标识来源账号</div>
+                    </div>
+                    <div class="card-content">
+                        <div id="keysGrid"></div>
+                    </div>
                 </div>
-                <div class="stat-item">
-                    <div class="stat-value" id="keyCount">-</div>
-                    <div class="stat-label">Key 数量</div>
+
+                <div style="margin-top:1.5rem;text-align:center;font-size:0.8125rem;color:hsl(var(--muted-foreground));" id="refreshTime"></div>
+            </div>
+        </div>
+
+        <!-- === Settings Page === -->
+        <div class="page" id="page-settings">
+            <div class="main-header">
+                <h1>设置</h1>
+                <p>配置代理目标地址等参数</p>
+            </div>
+            <div class="main-body">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">代理配置</div>
+                        <div class="card-description">设置上游 API 的 Base URL，保存后立即生效</div>
+                    </div>
+                    <div class="card-content">
+                        <div class="settings-group">
+                            <div class="field-group">
+                                <label for="settingBaseUrl">Base URL</label>
+                                <input type="text" id="settingBaseUrl" placeholder="https://api.xiaomimimo.com">
+                                <div class="field-hint">Chat Completions 端点将自动拼接为 <code>{base_url}/v1/chat/completions</code></div>
+                            </div>
+                            <div class="field-actions">
+                                <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+                                <span class="status-msg" id="settingsStatus"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top:1.25rem;">
+                    <div class="card-header">
+                        <div class="card-title">健康检查</div>
+                        <div class="card-description">测试所有启用的 Key，连续失败指定次数后自动禁用</div>
+                    </div>
+                    <div class="card-content">
+                        <div class="settings-group">
+                            <div class="field-group">
+                                <label for="healthThreshold">连续失败阈值</label>
+                                <input type="text" id="healthThreshold" value="3" placeholder="3" style="max-width:6rem;">
+                                <div class="field-hint">单个 Key 连续失败此次数后将自动禁用</div>
+                            </div>
+                            <div class="field-actions">
+                                <button class="btn btn-primary" id="healthCheckBtn" onclick="runHealthCheck()">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/></svg>
+                                    开始检查
+                                </button>
+                            </div>
+                        </div>
+                        <div id="healthResults" style="margin-top:1rem;"></div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top:1.25rem;">
+                    <div class="card-header">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <div class="card-title">代理 Key（sk-xxx）</div>
+                            <button class="btn btn-primary btn-sm" onclick="generateProxyKey()">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
+                                生成
+                            </button>
+                        </div>
+                        <div class="card-description" style="margin-top:0.5rem;">客户端调用本代理时须携带此 Key 作为 <code>Authorization: Bearer sk-xxx</code></div>
+                    </div>
+                    <div class="card-content">
+                        <div id="proxyKeysGrid"></div>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div class="card">
-            <div class="section-header">
-                <span class="section-title">API Keys</span>
+        <!-- === Logs Page === -->
+        <div class="page" id="page-logs">
+            <div class="main-header">
+                <h1>请求日志</h1>
+                <p>最近 1 小时的代理请求记录，每 5 秒自动刷新</p>
             </div>
-            <div class="add-form">
-                <input type="text" id="newKeyInput" placeholder="输入新 Key">
-                <button class="btn-add" onclick="addKey()">+ 添加</button>
+            <div class="main-body">
+                <div id="logsGrid"></div>
             </div>
-            <div id="keysGrid" class="keys-grid"></div>
         </div>
-
-        <div class="refresh-time" id="refreshTime"></div>
     </div>
+    <div class="modal-overlay" id="testModal">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle">测试 Key</div>
+                <button class="modal-close" onclick="closeTestModal()" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
+    </div>
+
+    <!-- ===== Add Key Modal ===== -->
+    <div class="modal-overlay" id="addKeyModal">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">添加 Key</div>
+                <button class="modal-close" onclick="closeAddKeyModal()" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="field-group">
+                    <label for="addKeyInput">API Key</label>
+                    <input type="text" id="addKeyInput" placeholder="sk-..." style="width:100%;">
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label for="addKeyNote">备注</label>
+                    <textarea id="addKeyNote" rows="3" placeholder="例如：张三的账号、测试环境…" style="width:100%;"></textarea>
+                    <div class="field-hint">标识此 Key 的来源，方便管理</div>
+                </div>
+                <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
+                    <button class="btn btn-outline" onclick="closeAddKeyModal()" style="flex:1;">取消</button>
+                    <button class="btn btn-primary" onclick="submitAddKey()" style="flex:1;">添加</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Log Detail Modal ===== -->
+    <div class="modal-overlay" id="logDetailModal">
+        <div class="modal" style="max-width:48rem;" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">请求详情</div>
+                <button class="modal-close" onclick="closeLogDetail()" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="logDetailBody" style="max-height:70vh;overflow-y:auto;"></div>
+        </div>
+    </div>
+
+    <!-- ===== Toast ===== -->
+    <div class="toast" id="toast"></div>
 
     <script>
         const API_BASE = '';
+
+        /* ========== Icon SVGs (Lucide) ========== */
+        const ICO = {
+            key:        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>',
+            settings:   '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0a2.34 2.34 0 0 0 3.319 1.915a2.34 2.34 0 0 1 2.33 4.033a2.34 2.34 0 0 0 0 3.831a2.34 2.34 0 0 1-2.33 4.033a2.34 2.34 0 0 0-3.319 1.915a2.34 2.34 0 0 1-4.659 0a2.34 2.34 0 0 0-3.32-1.915a2.34 2.34 0 0 1-2.33-4.033a2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g></svg>',
+            logs:       '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 12h-5m5-4h-5m9 9V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></g></svg>',
+            plus:       '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>',
+            play:       '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg>',
+            wrench:     '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/></svg>',
+            copy:       '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></g></svg>',
+            x:          '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>',
+            check:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></g></svg>',
+            cross:      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6m0-6 6 6"/></g></svg>',
+            alert:      '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1zm-8-5v4m0 4h.01"/></svg>',
+            logo:       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>',
+            toggleOn:   '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="15" cy="12" r="3"/><rect width="20" height="14" x="2" y="5" rx="7"/></g></svg>',
+            toggleOff:  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="9" cy="12" r="3"/><rect width="20" height="14" x="2" y="5" rx="7"/></g></svg>',
+        };
+
+        /* ========== Page Navigation ========== */
+
+        function switchPage(name) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            const page = document.getElementById('page-' + name);
+            const nav = document.querySelector('.nav-item[data-page="' + name + '"]');
+            if (page) page.classList.add('active');
+            if (nav) nav.classList.add('active');
+
+            // Lazy-load settings when switching to settings page
+            if (name === 'settings') { loadSettings(); loadProxyKeys(); }
+
+            // Auto-refresh logs when on logs page
+            if (name === 'logs') { logsPage = 1; startLogsRefresh(); } else { stopLogsRefresh(); }
+        }
+
+        /* ========== Helpers ========== */
+
+        function maskKey(key) {
+            if (key.length <= 8) return '••••' + key.slice(-4);
+            return key.slice(0, 4) + '••••' + key.slice(-4);
+        }
+
+        function formatDate(dateStr) {
+            return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        }
+
+        function showToast(msg, isError) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast show' + (isError ? ' error' : '');
+            clearTimeout(t._timer);
+            t._timer = setTimeout(() => { t.className = 'toast'; }, 2500);
+        }
+
+        /* ========== Keys Page ========== */
 
         async function fetchStats() {
             try {
                 const res = await fetch(API_BASE + '/stats');
                 const data = await res.json();
-                document.getElementById('proxyRequests').textContent = data.proxy_requests || 0;
-                document.getElementById('totalUsage').textContent = data.total_usage || 0;
-                const enabled = data.enabled_keys || 0;
-                const disabled = data.disabled_keys || 0;
-                document.getElementById('keyCount').textContent = enabled + disabled;
-            } catch (e) {
-                console.error('Failed to fetch stats:', e);
+                document.getElementById('totalCalls').textContent = (data.total_calls || 0).toLocaleString();
+                document.getElementById('totalTokens').textContent = (data.total_tokens || 0).toLocaleString();
+                document.getElementById('keyCount').textContent = (data.enabled_keys || 0) + (data.disabled_keys || 0);
+            } catch (e) { console.error('fetchStats:', e); }
+        }
+
+        function renderKeysTable(keys) {
+            if (!keys || keys.length === 0) {
+                return `<div class="empty-state">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                    <p>暂无 API Key</p><p class="empty-hint">添加你的第一个 Key 开始使用</p>
+                </div>`;
             }
+            let rows = '';
+            for (const k of keys) {
+                const badge = k.enabled
+                    ? `<span class="badge badge-success"><span class="badge-dot"></span>启用</span>`
+                    : `<span class="badge badge-warning"><span class="badge-dot"></span>禁用</span>`;
+                const toggle = k.enabled
+                    ? `<button class="btn btn-sm btn-warning-outline" onclick="toggleKey('${k.key}', ${k.enabled})">禁用</button>`
+                    : `<button class="btn btn-sm btn-success-outline" onclick="toggleKey('${k.key}', ${k.enabled})">启用</button>`;
+                const noteDisplay = k.note
+                    ? `<span class="td-note" title="${k.note}">${k.note}</span>`
+                    : `<span class="td-note-empty" onclick="editNote('${k.key}','')">点击添加备注</span>`;
+                rows += `<tr>
+                    <td class="td-key" title="${k.key}">${maskKey(k.key)}</td>
+                    <td>${noteDisplay}</td>
+                    <td>${badge}</td>
+                    <td class="td-usage">${k.usage_count}</td>
+                    <td class="td-usage" style="font-weight:600;">${k.total_tokens.toLocaleString()}</td>
+                    <td class="td-date">${formatDate(k.created_at)}</td>
+                    <td class="td-actions"><div class="btn-group">
+                        <button class="btn btn-sm btn-outline" onclick="openTestModal('${k.key}')">测试</button>
+                        ${toggle}
+                        <button class="btn btn-sm btn-destructive-ghost" onclick="removeKey('${k.key}')">删除</button>
+                    </div></td>
+                </tr>`;
+            }
+            return `<div class="table-wrapper"><table><thead><tr>
+                <th>Key</th><th>备注</th><th>状态</th><th>调用</th><th>Total</th><th>创建时间</th><th style="text-align:right">操作</th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
         }
 
         async function fetchKeys() {
             try {
                 const res = await fetch(API_BASE + '/keys');
                 const data = await res.json();
-                const grid = document.getElementById('keysGrid');
-                
-                if (!data.keys || data.keys.length === 0) {
-                    grid.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-state-icon">🔑</div>
-                            <div>暂无 Key</div>
-                            <div style="font-size:13px;margin-top:8px;">添加你的第一个 API Key 开始使用</div>
-                        </div>
-                    `;
-                    return;
-                }
-                
-                grid.innerHTML = '';
-                
-                for (const key of data.keys) {
-                    const initial = key.key.substring(0, 1).toUpperCase();
-                    const card = document.createElement('div');
-                    card.className = `key-card ${key.enabled ? '' : 'disabled'}`;
-                    card.innerHTML = `
-                        <div class="key-header">
-                            <div class="key-icon">${initial}</div>
-                            <span class="status-badge ${key.enabled ? 'status-enabled' : 'status-disabled'}">
-                                ${key.enabled ? '● 启用' : '○ 禁用'}
-                            </span>
-                        </div>
-                        <div class="key-info">
-                            <div class="key-value" title="${key.key}">${maskKey(key.key)}</div>
-                            <div class="key-meta">
-                                <span>用量: ${key.usage_count}</span>
-                                <span>${formatDate(key.created_at)}</span>
-                            </div>
-                        </div>
-                        <div class="key-actions">
-                            <button class="${key.enabled ? 'btn-disable' : 'btn-enable'}" 
-                                    onclick="toggleKey('${key.key}', ${key.enabled})">
-                                ${key.enabled ? '禁用' : '启用'}
-                            </button>
-                            <button class="btn-remove" onclick="removeKey('${key.key}')">删除</button>
-                        </div>
-                    `;
-                    grid.appendChild(card);
-                }
-            } catch (e) {
-                console.error('Failed to fetch keys:', e);
-            }
+                document.getElementById('keysGrid').innerHTML = renderKeysTable(data.keys);
+            } catch (e) { console.error('fetchKeys:', e); }
         }
 
-        function maskKey(key) {
-            if (key.length <= 8) return '****' + key.slice(-4);
-            return key.slice(0, 4) + '****' + key.slice(-4);
+        /* ========== Add Key Modal ========== */
+
+        function openAddKeyModal() {
+            document.getElementById('addKeyInput').value = '';
+            document.getElementById('addKeyNote').value = '';
+            document.getElementById('addKeyModal').classList.add('open');
+            setTimeout(() => document.getElementById('addKeyInput').focus(), 100);
         }
-
-        function formatDate(dateStr) {
-            const date = new Date(dateStr);
-            return date.toLocaleDateString('zh-CN');
+        function closeAddKeyModal() {
+            document.getElementById('addKeyModal').classList.remove('open');
         }
+        document.getElementById('addKeyModal').addEventListener('click', function(e) {
+            if (e.target === this) closeAddKeyModal();
+        });
 
-        async function addKey() {
-            const input = document.getElementById('newKeyInput');
-            const key = input.value.trim();
-            if (!key) return;
-
+        async function submitAddKey() {
+            const key = document.getElementById('addKeyInput').value.trim();
+            const note = document.getElementById('addKeyNote').value.trim();
+            if (!key) { document.getElementById('addKeyInput').focus(); return; }
             try {
                 const res = await fetch(API_BASE + '/keys', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({action: 'add', key})
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'add', key, note})
                 });
                 if (res.ok) {
-                    input.value = '';
-                    await fetchKeys();
-                    await fetchStats();
+                    closeAddKeyModal();
+                    await Promise.all([fetchKeys(), fetchStats()]);
+                    showToast('Key 已添加');
                 }
-            } catch (e) {
-                alert('添加失败: ' + e);
-            }
+            } catch (e) { alert('添加失败: ' + e); }
         }
 
-        async function toggleKey(key, currentlyEnabled) {
-            const action = currentlyEnabled ? 'disable' : 'enable';
+        /* ========== Inline Note Edit ========== */
+
+        async function editNote(key, current) {
+            const note = prompt('编辑备注：', current || '');
+            if (note === null) return; // cancelled
             try {
-                const res = await fetch(API_BASE + '/keys', {
+                await fetch(API_BASE + '/keys', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({action, key})
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'update-note', key, note})
                 });
-                if (res.ok) {
-                    await fetchKeys();
-                    await fetchStats();
-                }
-            } catch (e) {
-                alert('操作失败: ' + e);
-            }
+                await fetchKeys();
+            } catch (e) { alert('更新失败: ' + e); }
+        }
+
+        async function toggleKey(key, on) {
+            try {
+                const res = await fetch(API_BASE + '/keys', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action: on ? 'disable' : 'enable', key}) });
+                if (res.ok) await Promise.all([fetchKeys(), fetchStats()]);
+            } catch (e) { alert('操作失败: ' + e); }
         }
 
         async function removeKey(key) {
-            if (!confirm('确定删除这个 Key?')) return;
+            if (!confirm('确定删除这个 Key？')) return;
             try {
-                const res = await fetch(API_BASE + '/keys', {
+                const res = await fetch(API_BASE + '/keys', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action:'remove', key}) });
+                if (res.ok) await Promise.all([fetchKeys(), fetchStats()]);
+            } catch (e) { alert('删除失败: ' + e); }
+        }
+
+        /* ========== Settings Page ========== */
+
+        async function loadSettings() {
+            try {
+                const res = await fetch(API_BASE + '/settings');
+                const data = await res.json();
+                document.getElementById('settingBaseUrl').value = data.base_url || '';
+            } catch (e) { console.error('loadSettings:', e); }
+        }
+
+        async function saveSettings() {
+            const baseUrl = document.getElementById('settingBaseUrl').value.trim();
+            const status = document.getElementById('settingsStatus');
+            if (!baseUrl) {
+                status.textContent = '请输入 Base URL';
+                status.className = 'status-msg show error';
+                setTimeout(() => { status.className = 'status-msg'; }, 2500);
+                return;
+            }
+            try {
+                const res = await fetch(API_BASE + '/settings', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({action: 'remove', key})
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({base_url: baseUrl})
                 });
                 if (res.ok) {
-                    await fetchKeys();
-                    await fetchStats();
+                    status.textContent = '✓ 已保存';
+                    status.className = 'status-msg show';
+                    setTimeout(() => { status.className = 'status-msg'; }, 2500);
+                } else {
+                    status.textContent = '保存失败';
+                    status.className = 'status-msg show error';
+                    setTimeout(() => { status.className = 'status-msg'; }, 2500);
                 }
             } catch (e) {
-                alert('删除失败: ' + e);
+                status.textContent = '保存失败: ' + e.message;
+                status.className = 'status-msg show error';
+                setTimeout(() => { status.className = 'status-msg'; }, 3000);
             }
         }
 
-        function updateTime() {
-            document.getElementById('refreshTime').textContent = 
-                '最后更新: ' + new Date().toLocaleTimeString();
+        /* ========== Proxy Keys ========== */
+
+        async function loadProxyKeys() {
+            try {
+                const res = await fetch(API_BASE + '/proxy-keys');
+                const data = await res.json();
+                renderProxyKeys(data.keys || []);
+            } catch (e) { console.error('loadProxyKeys:', e); }
         }
+
+        function renderProxyKeys(keys) {
+            const grid = document.getElementById('proxyKeysGrid');
+            if (!keys || keys.length === 0) {
+                grid.innerHTML = `<div class="empty-state" style="padding:2rem 0;">
+                    <p>暂无代理 Key</p><p class="empty-hint">点击「生成」创建客户端调用凭证</p></div>`;
+                return;
+            }
+            let rows = '';
+            for (const k of keys) {
+                const badge = k.enabled
+                    ? '<span class="badge badge-success"><span class="badge-dot"></span>启用</span>'
+                    : '<span class="badge badge-warning"><span class="badge-dot"></span>禁用</span>';
+                const toggle = k.enabled
+                    ? `<button class="btn btn-sm btn-warning-outline" onclick="toggleProxyKey('${k.key}', false)">禁用</button>`
+                    : `<button class="btn btn-sm btn-success-outline" onclick="toggleProxyKey('${k.key}', true)">启用</button>`;
+                rows += `<tr>
+                    <td class="td-key" title="${k.key}" style="max-width:320px;">${k.key}</td>
+                    <td>${k.note || '-'}</td>
+                    <td>${badge}</td>
+                    <td class="td-date">${formatDate(k.created_at)}</td>
+                    <td class="td-actions"><div class="btn-group">
+                        <button class="btn btn-sm btn-outline" onclick="copyKey('${k.key}')">复制</button>
+                        ${toggle}
+                        <button class="btn btn-sm btn-destructive-ghost" onclick="removeProxyKey('${k.key}')">删除</button>
+                    </div></td>
+                </tr>`;
+            }
+            grid.innerHTML = `<div class="table-wrapper"><table><thead><tr>
+                <th>Key</th><th>备注</th><th>状态</th><th>创建时间</th><th style="text-align:right">操作</th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
+        }
+
+        async function generateProxyKey() {
+            const note = prompt('备注（可选）：', '');
+            if (note === null) return;
+            try {
+                const res = await fetch(API_BASE + '/proxy-keys', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'generate', note})
+                });
+                const data = await res.json();
+                if (data.key) {
+                    await loadProxyKeys();
+                    showToast('已生成：' + data.key);
+                    // Copy to clipboard
+                    try { await navigator.clipboard.writeText(data.key); showToast('已复制到剪贴板'); } catch(_){}
+                }
+            } catch (e) { alert('生成失败: ' + e); }
+        }
+
+        async function toggleProxyKey(key, enable) {
+            try {
+                await fetch(API_BASE + '/proxy-keys', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action: enable ? 'enable' : 'disable', key})
+                });
+                await loadProxyKeys();
+            } catch (e) { alert('操作失败: ' + e); }
+        }
+
+        async function removeProxyKey(key) {
+            if (!confirm('确定删除此代理 Key？')) return;
+            try {
+                await fetch(API_BASE + '/proxy-keys', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'remove', key})
+                });
+                await loadProxyKeys();
+            } catch (e) { alert('删除失败: ' + e); }
+        }
+
+        function copyKey(key) {
+            navigator.clipboard.writeText(key).then(() => showToast('已复制'));
+        }
+
+        /* ========== Logs ========== */
+
+        let logsTimer = null;
+        let logsPage = 1;
+
+        async function loadLogs() {
+            try {
+                const res = await fetch(API_BASE + '/logs?page=' + logsPage);
+                const data = await res.json();
+                renderLogs(data.logs || [], data.total || 0, data.page || 1);
+            } catch (e) { console.error('loadLogs:', e); }
+        }
+
+        function renderLogs(logs, total, page) {
+            const grid = document.getElementById('logsGrid');
+            const totalPages = Math.max(Math.ceil(total / 10), 1);
+
+            if (!logs || logs.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><p>暂无请求日志</p><p class="empty-hint">最近 1 小时内的请求会显示在这里</p></div>';
+                return;
+            }
+            let rows = '';
+            for (const l of logs) {
+                const statusClass = l.status_code >= 200 && l.status_code < 300 ? 'color:hsl(142 76% 36%)' : 'color:hsl(0 84.2% 60.2%)';
+                const time = l.created_at ? new Date(l.created_at.replace(' ', 'T') + (l.created_at.includes('Z') ? '' : 'Z')).toLocaleTimeString('zh-CN') : '-';
+                rows += `<tr>
+                    <td style="font-size:0.8125rem;color:hsl(var(--muted-foreground));white-space:nowrap;">${time}</td>
+                    <td><code style="font-size:0.75rem;">${l.method}</code></td>
+                    <td style="font-size:0.8125rem;font-family:monospace;">${l.path}</td>
+                    <td style="${statusClass};font-weight:600;">${l.status_code}</td>
+                    <td class="td-usage">${l.latency_ms} ms</td>
+                    <td style="font-size:0.8125rem;font-family:monospace;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${l.proxy_key||''}">${l.proxy_key ? l.proxy_key.substring(0,12)+'…' : '-'}</td>
+                    <td style="font-size:0.8125rem;">${l.model || '-'}</td>
+                    <td class="td-usage">${l.total_tokens || '-'}</td>
+                    <td style="font-size:0.8125rem;color:hsl(0 84.2% 50%);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${l.error||''}">${l.error || ''}</td>
+                    <td class="td-actions"><button class="btn btn-sm btn-outline" onclick="showLogDetail(${l.id})">详情</button></td>
+                </tr>`;
+            }
+            const pagination = `<div class="pagination">
+                <span class="pagination-info">共 ${total} 条，第 ${page}/${totalPages} 页</span>
+                <div class="pagination-btns">
+                    <button class="btn btn-sm btn-outline" onclick="logsGoPage(1)" ${page<=1?'disabled':''}>首页</button>
+                    <button class="btn btn-sm btn-outline" onclick="logsGoPage(${page-1})" ${page<=1?'disabled':''}>上一页</button>
+                    <button class="btn btn-sm btn-outline" onclick="logsGoPage(${page+1})" ${page>=totalPages?'disabled':''}>下一页</button>
+                    <button class="btn btn-sm btn-outline" onclick="logsGoPage(${totalPages})" ${page>=totalPages?'disabled':''}>末页</button>
+                </div>
+            </div>`;
+            grid.innerHTML = `<div class="table-wrapper"><table><thead><tr>
+                <th>时间</th><th>方法</th><th>路径</th><th>状态</th><th>延迟</th><th>代理Key</th><th>模型</th><th>Tokens</th><th>错误</th><th></th>
+            </tr></thead><tbody>${rows}</tbody></table></div>${pagination}`;
+        }
+
+        function logsGoPage(page) {
+            if (page < 1) return;
+            logsPage = page;
+            loadLogs();
+        }
+
+        function startLogsRefresh() {
+            if (logsTimer) return;
+            loadLogs();
+            logsTimer = setInterval(loadLogs, 5000);
+        }
+
+        function stopLogsRefresh() {
+            if (logsTimer) { clearInterval(logsTimer); logsTimer = null; }
+        }
+
+        async function showLogDetail(id) {
+            const modal = document.getElementById('logDetailModal');
+            const body = document.getElementById('logDetailBody');
+            body.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+            modal.classList.add('open');
+
+            try {
+                const res = await fetch(API_BASE + '/logs?id=' + id);
+                const l = await res.json();
+
+                const reqBody = l.request_body ? formatJSON(l.request_body) : '<span style="color:hsl(var(--muted-foreground))">-</span>';
+                const resBody = l.response_body ? formatJSON(l.response_body) : '<span style="color:hsl(var(--muted-foreground))">（流式响应，未记录完整内容）</span>';
+
+                body.innerHTML = `
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem;">
+                        <div class="result-row" style="border:none;padding:0;"><span class="result-label">状态</span><span class="result-value" style="color:${l.status_code>=200&&l.status_code<300?'hsl(142 76% 36%)':'hsl(0 84.2% 60.2%)'};font-weight:600;">${l.status_code}</span></div>
+                        <div class="result-row" style="border:none;padding:0;"><span class="result-label">延迟</span><span class="result-value">${l.latency_ms} ms</span></div>
+                        <div class="result-row" style="border:none;padding:0;"><span class="result-label">模型</span><span class="result-value">${l.model||'-'}</span></div>
+                        <div class="result-row" style="border:none;padding:0;"><span class="result-label">Tokens</span><span class="result-value">${l.total_tokens||0}</span></div>
+                    </div>
+                    <div style="margin-bottom:1rem;">
+                        <div style="font-size:0.8125rem;font-weight:500;margin-bottom:0.375rem;">Request</div>
+                        <div class="code-block">${reqBody}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.8125rem;font-weight:500;margin-bottom:0.375rem;">Response</div>
+                        <div class="code-block">${resBody}</div>
+                    </div>`;
+            } catch (e) {
+                body.innerHTML = `<div class="result-error-banner">${ICO.cross}<span>${e.message}</span></div>`;
+            }
+        }
+
+        function closeLogDetail() {
+            document.getElementById('logDetailModal').classList.remove('open');
+        }
+        document.getElementById('logDetailModal').addEventListener('click', closeLogDetail);
+
+        function formatJSON(str) {
+            const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            try { return esc(JSON.stringify(JSON.parse(str), null, 2)); } catch(e) {}
+            if (str.startsWith('data: ')) {
+                return str.split('\n').map(line => {
+                    if (line.startsWith('data: ')) {
+                        const payload = line.slice(6);
+                        if (payload === '[DONE]') return '<span style="color:hsl(var(--muted-foreground))">data: [DONE]</span>';
+                        try { return 'data: ' + esc(JSON.stringify(JSON.parse(payload), null, 2)); } catch(e) {}
+                    }
+                    return esc(line);
+                }).join('\n');
+            }
+            return esc(str);
+        }
+
+        /* ========== Health Check ========== */
+
+        async function runHealthCheck() {
+            const threshold = parseInt(document.getElementById('healthThreshold').value) || 3;
+            const btn = document.getElementById('healthCheckBtn');
+            const container = document.getElementById('healthResults');
+
+            btn.disabled = true;
+            btn.textContent = '检查中…';
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>正在检查所有 Key…</div>';
+
+            try {
+                const res = await fetch(API_BASE + '/health-check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ threshold })
+                });
+                const data = await res.json();
+                renderHealthResults(data, threshold);
+                await Promise.all([fetchKeys(), fetchStats()]);
+            } catch (e) {
+                container.innerHTML = `<div class="result-error-banner">
+                    ${ICO.cross}
+                    <span>检查失败：${e.message}</span></div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `${ICO.wrench}开始检查`;
+            }
+        }
+
+        function renderHealthResults(data, threshold) {
+            const container = document.getElementById('healthResults');
+            const results = data.results || [];
+
+            if (results.length === 0) {
+                container.innerHTML = '<p style="font-size:0.875rem;color:hsl(var(--muted-foreground));text-align:center;padding:1.5rem 0;">没有启用的 Key</p>';
+                return;
+            }
+
+            const summary = data.disabled_count > 0
+                ? `<div class="result-error-banner" style="margin-bottom:0.75rem;">${ICO.alert}<span>已自动禁用 ${data.disabled_count} 个不可用 Key</span></div>`
+                : `<div class="result-success-banner" style="margin-bottom:0.75rem;">${ICO.check}<span>所有 Key 均可用</span></div>`;
+
+            let rows = '';
+            for (const r of results) {
+                const statusIcon = r.status === 'ok'
+                    ? '<span style="color:hsl(142 76% 36%);font-weight:600;">✓ 通过</span>'
+                    : '<span style="color:hsl(0 84.2% 60.2%);font-weight:600;">✗ 失败</span>';
+                const action = r.disabled
+                    ? '<span class="badge badge-warning"><span class="badge-dot"></span>已禁用</span>'
+                    : (r.status === 'ok' ? '<span style="color:hsl(var(--muted-foreground));font-size:0.8125rem;">-</span>' : '');
+
+                rows += `<tr>
+                    <td class="td-key">${r.key}</td>
+                    <td>${statusIcon}</td>
+                    <td class="td-usage">${r.latency || '-'} ms</td>
+                    <td>${r.error || ''}</td>
+                    <td>${action}</td>
+                </tr>`;
+            }
+
+            container.innerHTML = summary + `<div class="table-wrapper"><table>
+                <thead><tr><th>Key</th><th>状态</th><th>延迟</th><th>错误信息</th><th>操作</th></tr></thead>
+                <tbody>${rows}</tbody></table></div>`;
+        }
+
+        /* ========== Test Key Modal ========== */
+
+        async function openTestModal(key) {
+            const overlay = document.getElementById('testModal');
+            document.getElementById('modalTitle').textContent = '测试 Key';
+            document.getElementById('modalBody').innerHTML = `
+                <div class="result-row" style="border:none;padding-bottom:0.75rem;">
+                    <span class="result-label">Key</span>
+                    <span class="result-value" style="font-family:monospace;font-size:0.8125rem;">${maskKey(key)}</span>
+                </div>
+                <div style="margin-bottom:1rem;">
+                    <label style="display:block;font-size:0.8125rem;font-weight:500;margin-bottom:0.375rem;">模型</label>
+                    <div class="loading" style="padding:1rem 0;"><div class="spinner" style="width:1.25rem;height:1.25rem;"></div>加载模型列表…</div>
+                </div>`;
+            overlay.classList.add('open');
+
+            try {
+                const res = await fetch(API_BASE + '/models?key=' + encodeURIComponent(key));
+                if (!res.ok) {
+                    let msg = `获取模型失败 (HTTP ${res.status})`;
+                    try { const e = await res.json(); if (e.error) msg = e.error.message || e.error; } catch(_){}
+                    throw new Error(msg);
+                }
+                const data = await res.json();
+                let opts = '';
+                if (data.data && data.data.length > 0) {
+                    for (const m of data.data) opts += `<option value="${m.id}">${m.id}</option>`;
+                } else {
+                    opts = '<option value="mimo-v2.5-pro">mimo-v2.5-pro</option>';
+                }
+                document.getElementById('modalBody').innerHTML = `
+                    <div class="result-row" style="border:none;padding-bottom:0.75rem;">
+                        <span class="result-label">Key</span>
+                        <span class="result-value" style="font-family:monospace;font-size:0.8125rem;">${maskKey(key)}</span>
+                    </div>
+                    <div style="margin-bottom:1rem;">
+                        <label style="display:block;font-size:0.8125rem;font-weight:500;margin-bottom:0.375rem;">模型</label>
+                        <select id="testModelSelect" style="width:100%;">${opts}</select>
+                    </div>
+                    <button class="btn btn-primary btn-full" onclick="_runTest('${key}')">开始测试</button>`;
+            } catch (e) {
+                document.getElementById('modalBody').innerHTML = `
+                    <div class="result-row" style="border:none;padding-bottom:0.75rem;">
+                        <span class="result-label">Key</span>
+                        <span class="result-value" style="font-family:monospace;font-size:0.8125rem;">${maskKey(key)}</span>
+                    </div>
+                    <div class="result-error-banner" style="margin-top:0.5rem;">
+                        ${ICO.cross}
+                        <span>${e.message || '网络错误'}</span>
+                    </div>
+                    <div style="margin-bottom:1rem;">
+                        <label style="display:block;font-size:0.8125rem;font-weight:500;margin-bottom:0.375rem;">模型（手动输入）</label>
+                        <input type="text" id="testModelSelect" style="width:100%;" value="mimo-v2.5-pro" placeholder="输入模型名称">
+                    </div>
+                    <button class="btn btn-primary btn-full" onclick="_runTest('${key}')">仍然测试</button>`;
+            }
+        }
+
+        function closeTestModal() { document.getElementById('testModal').classList.remove('open'); }
+        document.getElementById('testModal').addEventListener('click', closeTestModal);
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeTestModal(); });
+
+        async function _runTest(key) {
+            const model = document.getElementById('testModelSelect').value;
+            const body = document.getElementById('modalBody');
+            body.innerHTML = `<div class="loading"><div class="spinner"></div>正在测试 ${model} …</div>`;
+            try {
+                const t0 = performance.now();
+                const res = await fetch(API_BASE + '/test-key', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key, model}) });
+                if (!res.ok) {
+                    let msg = `HTTP ${res.status}`;
+                    try { const e = await res.json(); msg = e.error || e.message || msg; } catch(_){}
+                    body.innerHTML = `<div class="result-error-banner">
+                        ${ICO.cross}
+                        <span>请求失败：${msg}</span></div>
+                        <div style="margin-top:1rem;"><button class="btn btn-outline btn-full" onclick="closeTestModal()">关闭</button></div>`;
+                    return;
+                }
+                const data = await res.json();
+                renderTestResult(data, Math.round(performance.now() - t0));
+            } catch (e) {
+                body.innerHTML = `<div class="result-error-banner">
+                    ${ICO.cross}
+                    <span>请求失败：${e.message || '网络错误'}</span></div>
+                    <div style="margin-top:1rem;"><button class="btn btn-outline btn-full" onclick="closeTestModal()">关闭</button></div>`;
+            }
+        }
+
+        function renderTestResult(data, netMs) {
+            const body = document.getElementById('modalBody');
+            const sep = '<div class="separator" style="margin:0.75rem 0;"></div>';
+            const closeBtn = '<div style="margin-top:1rem;"><button class="btn btn-outline btn-full" onclick="closeTestModal()">关闭</button></div>';
+
+            if (data.status === 'ok') {
+                const d = data.data || {}, u = d.usage || {}, cd = u.completion_tokens_details || {};
+                const ch = (d.choices || [])[0] || {};
+                body.innerHTML = `
+                    <div class="result-success-banner">${ICO.check}<span>Key 验证通过</span></div>
+                    <div class="result-row"><span class="result-label">Request ID</span><span class="result-value" style="font-family:monospace;font-size:0.75rem;">${d.id||'-'}</span></div>
+                    <div class="result-row"><span class="result-label">模型</span><span class="result-value">${d.model||'-'}</span></div>
+                    <div class="result-row"><span class="result-label">停止原因</span><span class="result-value">${ch.finish_reason||'-'}</span></div>
+                    <div class="result-row"><span class="result-label">服务延迟</span><span class="result-value">${data.latency} ms</span></div>
+                    <div class="result-row"><span class="result-label">网络往返</span><span class="result-value">${netMs} ms</span></div>
+                    ${sep}
+                    <div class="result-row"><span class="result-label">Prompt Tokens</span><span class="result-value">${u.prompt_tokens??'-'}</span></div>
+                    <div class="result-row"><span class="result-label">Completion Tokens</span><span class="result-value">${u.completion_tokens??'-'}</span></div>
+                    <div class="result-row"><span class="result-label">Reasoning Tokens</span><span class="result-value">${cd.reasoning_tokens??'-'}</span></div>
+                    <div class="result-row"><span class="result-label">Total Tokens</span><span class="result-value" style="font-weight:600;">${u.total_tokens??'-'}</span></div>
+                    ${sep}
+                    <div style="font-size:0.8125rem;font-weight:500;margin-bottom:0.5rem;">回复内容</div>
+                    <div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));background:hsl(var(--muted));padding:0.75rem;border-radius:var(--radius);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${(ch.message&&ch.message.content)||'(empty)'}</div>
+                    ${closeBtn}`;
+            } else {
+                let errMsg = '';
+                if (data.error_body) {
+                    if (data.error_body.error) errMsg = typeof data.error_body.error === 'string' ? data.error_body.error : data.error_body.error.message || JSON.stringify(data.error_body.error);
+                    else errMsg = JSON.stringify(data.error_body);
+                }
+                body.innerHTML = `
+                    <div class="result-error-banner">
+                        ${ICO.cross}
+                        <span>Key 验证失败</span></div>
+                    <div class="result-row"><span class="result-label">HTTP 状态码</span><span class="result-value" style="color:hsl(0 84.2% 60.2%);font-weight:600;">${data.code||'-'}</span></div>
+                    <div class="result-row"><span class="result-label">服务延迟</span><span class="result-value">${data.latency||'-'} ms</span></div>
+                    <div class="result-row"><span class="result-label">网络往返</span><span class="result-value">${netMs} ms</span></div>
+                    ${errMsg ? sep + '<div style="font-size:0.8125rem;font-weight:500;margin-bottom:0.5rem;">错误详情</div><div style="font-size:0.8125rem;color:hsl(0 84.2% 50%);background:hsl(0 84.2% 60.2% / 0.06);padding:0.75rem;border-radius:var(--radius);line-height:1.6;word-break:break-word;">'+errMsg+'</div>' : ''}
+                    ${closeBtn}`;
+            }
+        }
+
+        /* ========== Init ========== */
+
+        // Enter key in add key modal (key input only, textarea uses Enter for newline)
+        document.getElementById('addKeyInput').addEventListener('keydown', e => { if (e.key === 'Enter') submitAddKey(); });
 
         async function refresh() {
             await Promise.all([fetchStats(), fetchKeys()]);
-            updateTime();
+            document.getElementById('refreshTime').textContent = '最后更新: ' + new Date().toLocaleTimeString('zh-CN');
         }
-
         refresh();
         setInterval(refresh, 10000);
     </script>
