@@ -130,8 +130,8 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use cached models for validation (populated by user via /models endpoint).
-	models := h.getCachedModels(channel.ID)
+	// Get or refresh model cache (1h TTL). Fetches from upstream on miss/expiry.
+	models := h.getOrFetchModels(channel, key)
 	body = h.swapModelIfNeeded(body, models, defaultModel)
 
 	req, err := http.NewRequest(http.MethodPost, channel.BaseURL, bytes.NewReader(body))
@@ -485,6 +485,16 @@ func (h *Handler) getCachedModels(channelID int) []string {
 		return nil
 	}
 	return entry.models
+}
+
+// getOrFetchModels returns cached models or fetches from upstream if cache is empty/expired.
+func (h *Handler) getOrFetchModels(channel *ChannelInfo, key string) []string {
+	models := h.getCachedModels(channel.ID)
+	if models != nil {
+		return models
+	}
+	// Cache miss → fetch synchronously
+	return h.refreshModels(channel.ID, modelsURLFromBase(channel.BaseURL), key)
 }
 
 // swapModelIfNeeded replaces the model if it's not in the cached list.
