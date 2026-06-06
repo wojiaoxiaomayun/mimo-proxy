@@ -233,6 +233,13 @@ func (p *KeyPool) UpdateKeyDefaultModel(key, defaultModel string) error {
 	return err
 }
 
+func (p *KeyPool) UpdateKey(key, note, defaultModel string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE api_keys SET note = ?, default_model = ? WHERE key = ?`, note, defaultModel, key)
+	return err
+}
+
 func (p *KeyPool) GetAll(channelID int) ([]KeyInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

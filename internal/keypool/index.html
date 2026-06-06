@@ -579,6 +579,43 @@
         </div>
     </div>
 
+    <!-- ===== Edit Key Modal ===== -->
+    <div class="modal-overlay" id="editKeyModal">
+        <div class="modal" style="max-width:28rem;" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">编辑 Key</div>
+                <button class="modal-close" onclick="closeEditKeyModal()" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="field-group">
+                    <label>Key</label>
+                    <code id="editKeyDisplay" style="display:block;font-size:0.8125rem;background:hsl(var(--muted));padding:0.5rem 0.75rem;border-radius:var(--radius);word-break:break-all;"></code>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>备注</label>
+                    <textarea id="editKeyNote" rows="2" style="width:100%;"></textarea>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>默认模型</label>
+                    <div style="display:flex;gap:0.5rem;">
+                        <select id="editKeyModel" style="flex:1;">
+                            <option value="">不指定（透传原始模型）</option>
+                        </select>
+                        <button class="btn btn-outline" id="editRefreshModelsBtn" onclick="fetchModelsForEditKey()" data-tip="刷新模型列表">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9a9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5m5 4a9 9 0 0 1-9 9a9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></g></svg>
+                        </button>
+                    </div>
+                </div>
+                <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
+                    <button class="btn btn-outline" onclick="closeEditKeyModal()" style="flex:1;">取消</button>
+                    <button class="btn btn-primary" onclick="submitEditKey()" style="flex:1;">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== Add Channel Modal ===== -->
     <div class="modal-overlay" id="addChannelModal">
         <div class="modal" onclick="event.stopPropagation()">
@@ -742,7 +779,7 @@
                     : `<button class="btn btn-sm btn-ghost" data-tip="启用" onclick="toggleKey('${k.key}', ${k.enabled})">${ICO.toggleOff}</button>`;
                 const noteDisplay = k.note
                     ? `<span class="td-note" title="${k.note}">${k.note}</span>`
-                    : `<span class="td-note-empty" onclick="editNote('${k.key}','')">点击添加备注</span>`;
+                    : `<span class="td-note-empty" onclick='openEditKeyModal(${JSON.stringify(k).replace(/'/g,"&#39;")})'>点击添加备注</span>`;
                 rows += `<tr>
                     <td class="td-key" title="${k.key}">${maskKey(k.key)}</td>
                     <td>${noteDisplay}</td>
@@ -752,6 +789,7 @@
                     <td class="td-date">${formatDate(k.created_at)}</td>
                     <td class="td-actions"><div class="btn-group">
                         <button class="btn btn-sm btn-ghost" data-tip="测试" onclick="openTestModal('${k.key}', ${k.channel_id})">${ICO.play}</button>
+                        <button class="btn btn-sm btn-ghost" data-tip="编辑" onclick='openEditKeyModal(${JSON.stringify(k).replace(/'/g,"&#39;")})'>${ICO.pencil}</button>
                         ${toggle}
                         <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeKey('${k.key}')">${ICO.trash}</button>
                     </div></td>
@@ -769,6 +807,62 @@
                 const data = await res.json();
                 document.getElementById('keysGrid').innerHTML = renderKeysTable(data.keys || []);
             } catch (e) { console.error('fetchKeys:', e); }
+        }
+
+        /* ========== Edit Key Modal ========== */
+
+        let editKeyData = null;
+
+        function openEditKeyModal(k) {
+            editKeyData = k;
+            document.getElementById('editKeyDisplay').textContent = k.key;
+            document.getElementById('editKeyNote').value = k.note || '';
+            document.getElementById('editKeyModel').innerHTML = '<option value="">不指定（透传原始模型）</option>' +
+                (k.default_model ? `<option value="${k.default_model}" selected>${k.default_model}</option>` : '');
+            document.getElementById('editKeyModal').classList.add('open');
+        }
+
+        function closeEditKeyModal() {
+            document.getElementById('editKeyModal').classList.remove('open');
+            editKeyData = null;
+        }
+        document.getElementById('editKeyModal').addEventListener('click', function(e) { if (e.target === this) closeEditKeyModal(); });
+
+        async function fetchModelsForEditKey() {
+            if (!editKeyData) return;
+            const sel = document.getElementById('editKeyModel');
+            const btn = document.getElementById('editRefreshModelsBtn');
+            sel.innerHTML = '<option value="">加载中…</option>';
+            btn.disabled = true;
+            try {
+                const res = await fetch(API_BASE + '/models?channel=' + editKeyData.channel_id + '&key=' + encodeURIComponent(editKeyData.key));
+                const data = await res.json();
+                let opts = '<option value="">不指定（透传原始模型）</option>';
+                if (data.data && data.data.length > 0) {
+                    for (const m of data.data) {
+                        const selected = m.id === editKeyData.default_model ? ' selected' : '';
+                        opts += `<option value="${m.id}"${selected}>${m.id}</option>`;
+                    }
+                }
+                sel.innerHTML = opts;
+            } catch (e) { sel.innerHTML = '<option value="">不指定（透传原始模型）</option>'; }
+            btn.disabled = false;
+        }
+
+        async function submitEditKey() {
+            if (!editKeyData) return;
+            const note = document.getElementById('editKeyNote').value.trim();
+            const default_model = document.getElementById('editKeyModel').value || '';
+            try {
+                await fetch(API_BASE + '/keys', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'update', key: editKeyData.key, note, default_model})
+                });
+                closeEditKeyModal();
+                await fetchKeys();
+                showToast('已保存');
+            } catch (e) { alert('保存失败: ' + e); }
         }
 
         /* ========== Add Key Modal ========== */
@@ -837,19 +931,6 @@
         }
 
         /* ========== Inline Note Edit ========== */
-
-        async function editNote(key, current) {
-            const note = prompt('编辑备注：', current || '');
-            if (note === null) return; // cancelled
-            try {
-                await fetch(API_BASE + '/keys', {
-                    method: 'POST',
-                    headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({action:'update-note', key, note})
-                });
-                await fetchKeys();
-            } catch (e) { alert('更新失败: ' + e); }
-        }
 
         async function toggleKey(key, on) {
             try {

@@ -297,6 +297,8 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 			err = h.pool.Add(req.Key, req.Note, req.ChannelID, req.DefaultModel)
 		case "update-model":
 			err = h.pool.UpdateKeyDefaultModel(req.Key, req.DefaultModel)
+		case "update":
+			err = h.pool.UpdateKey(req.Key, req.Note, req.DefaultModel)
 		case "remove":
 			err = h.pool.Remove(req.Key)
 		case "enable":
