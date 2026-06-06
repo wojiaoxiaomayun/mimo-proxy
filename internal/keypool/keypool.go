@@ -15,6 +15,7 @@ type KeyInfo struct {
 	Key              string `json:"key"`
 	ChannelID        int    `json:"channel_id"`
 	Note             string `json:"note"`
+	DefaultModel     string `json:"default_model"`
 	UsageCount       int    `json:"usage_count"`
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
@@ -86,6 +87,7 @@ func New(dbPath, defaultURL string) (*KeyPool, error) {
 		"ALTER TABLE api_keys ADD COLUMN total_tokens INTEGER DEFAULT 0",
 		"ALTER TABLE api_keys ADD COLUMN note TEXT DEFAULT ''",
 		"ALTER TABLE api_keys ADD COLUMN channel_id INTEGER DEFAULT 0",
+		"ALTER TABLE api_keys ADD COLUMN default_model TEXT DEFAULT ''",
 		"ALTER TABLE channels ADD COLUMN is_default INTEGER DEFAULT 0",
 		"ALTER TABLE request_logs ADD COLUMN request_body TEXT DEFAULT ''",
 		"ALTER TABLE request_logs ADD COLUMN response_body TEXT DEFAULT ''",
@@ -155,25 +157,24 @@ func New(dbPath, defaultURL string) (*KeyPool, error) {
 	return &KeyPool{db: db}, nil
 }
 
-func (p *KeyPool) GetKey(channelID int) (string, error) {
+func (p *KeyPool) GetKey(channelID int) (key string, defaultModel string, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var key string
 	var enabled bool
-	err := p.db.QueryRow(`
-		SELECT key, enabled FROM api_keys 
+	err = p.db.QueryRow(`
+		SELECT key, COALESCE(default_model,''), enabled FROM api_keys 
 		WHERE enabled = 1 AND channel_id = ?
 		ORDER BY usage_count ASC, id ASC 
 		LIMIT 1
-	`, channelID).Scan(&key, &enabled)
+	`, channelID).Scan(&key, &defaultModel, &enabled)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("no available API key for channel %d", channelID)
+			return "", "", fmt.Errorf("no available API key for channel %d", channelID)
 		}
-		return "", err
+		return "", "", err
 	}
-	return key, nil
+	return key, defaultModel, nil
 }
 
 func (p *KeyPool) IncrementUsage(key string, promptTokens, completionTokens, totalTokens int) error {
@@ -190,10 +191,10 @@ func (p *KeyPool) IncrementUsage(key string, promptTokens, completionTokens, tot
 	return err
 }
 
-func (p *KeyPool) Add(key, note string, channelID int) error {
+func (p *KeyPool) Add(key, note string, channelID int, defaultModel string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, err := p.db.Exec(`INSERT OR IGNORE INTO api_keys (key, note, channel_id) VALUES (?, ?, ?)`, key, note, channelID)
+	_, err := p.db.Exec(`INSERT OR IGNORE INTO api_keys (key, note, channel_id, default_model) VALUES (?, ?, ?, ?)`, key, note, channelID, defaultModel)
 	return err
 }
 
@@ -225,6 +226,13 @@ func (p *KeyPool) UpdateNote(key, note string) error {
 	return err
 }
 
+func (p *KeyPool) UpdateKeyDefaultModel(key, defaultModel string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE api_keys SET default_model = ? WHERE key = ?`, defaultModel, key)
+	return err
+}
+
 func (p *KeyPool) GetAll(channelID int) ([]KeyInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -232,9 +240,9 @@ func (p *KeyPool) GetAll(channelID int) ([]KeyInfo, error) {
 	var rows *sql.Rows
 	var err error
 	if channelID > 0 {
-		rows, err = p.db.Query(`SELECT id, key, channel_id, note, usage_count, prompt_tokens, completion_tokens, total_tokens, enabled, created_at FROM api_keys WHERE channel_id = ? ORDER BY id`, channelID)
+		rows, err = p.db.Query(`SELECT id, key, channel_id, note, COALESCE(default_model,''), usage_count, prompt_tokens, completion_tokens, total_tokens, enabled, created_at FROM api_keys WHERE channel_id = ? ORDER BY id`, channelID)
 	} else {
-		rows, err = p.db.Query(`SELECT id, key, channel_id, note, usage_count, prompt_tokens, completion_tokens, total_tokens, enabled, created_at FROM api_keys ORDER BY id`)
+		rows, err = p.db.Query(`SELECT id, key, channel_id, note, COALESCE(default_model,''), usage_count, prompt_tokens, completion_tokens, total_tokens, enabled, created_at FROM api_keys ORDER BY id`)
 	}
 	if err != nil {
 		return nil, err
@@ -244,7 +252,7 @@ func (p *KeyPool) GetAll(channelID int) ([]KeyInfo, error) {
 	var keys []KeyInfo
 	for rows.Next() {
 		var k KeyInfo
-		if err := rows.Scan(&k.ID, &k.Key, &k.ChannelID, &k.Note, &k.UsageCount, &k.PromptTokens, &k.CompletionTokens, &k.TotalTokens, &k.Enabled, &k.CreatedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.Key, &k.ChannelID, &k.Note, &k.DefaultModel, &k.UsageCount, &k.PromptTokens, &k.CompletionTokens, &k.TotalTokens, &k.Enabled, &k.CreatedAt); err != nil {
 			return nil, err
 		}
 		keys = append(keys, k)
@@ -285,7 +293,7 @@ func (p *KeyPool) LoadFromEnv(keysStr string) error {
 	for _, key := range keys {
 		key = strings.TrimSpace(key)
 		if key != "" {
-			if err := p.Add(key, "", cid); err != nil {
+			if err := p.Add(key, "", cid, ""); err != nil {
 				return err
 			}
 		}
