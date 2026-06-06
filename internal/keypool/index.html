@@ -779,20 +779,8 @@
             const btn = document.getElementById('refreshModelsBtn');
             sel.innerHTML = '<option value="">加载中…</option>';
             btn.disabled = true;
-            // Use first enabled key of this channel to fetch models
-            const channel = allChannels.find(c => c.id == channelID);
-            if (!channel) { sel.innerHTML = '<option value="">不指定（透传原始模型）</option>'; btn.disabled = false; return; }
             try {
-                // Try fetching models using any available proxy key
-                const pkRes = await fetch(API_BASE + '/proxy-keys');
-                const pkData = await pkRes.json();
-                const proxyKeys = (pkData.keys || []).filter(k => k.enabled);
-                if (proxyKeys.length === 0) {
-                    sel.innerHTML = '<option value="">不指定（透传原始模型）</option>';
-                    btn.disabled = false;
-                    return;
-                }
-                const res = await fetch(API_BASE + '/models?key=' + encodeURIComponent(proxyKeys[0].key) + '&channel=' + channelID);
+                const res = await fetch(API_BASE + '/models?channel=' + channelID);
                 const data = await res.json();
                 let opts = '<option value="">不指定（透传原始模型）</option>';
                 if (data.data && data.data.length > 0) {
@@ -804,10 +792,13 @@
             }
             btn.disabled = false;
         }
-        function openAddKeyModal() {
+        }
+        async function openAddKeyModal() {
             document.getElementById('addKeyInput').value = '';
             document.getElementById('addKeyNote').value = '';
             document.getElementById('addKeyModel').innerHTML = '<option value="">不指定（透传原始模型）</option>';
+            // Ensure channels are loaded
+            if (allChannels.length === 0) await loadChannels();
             // Populate channel selector
             const sel = document.getElementById('addKeyChannel');
             sel.innerHTML = allChannels.map(c => `<option value="${c.id}">${c.name || c.prefix || '渠道'+c.id}</option>`).join('');
@@ -815,9 +806,6 @@
             if (filterVal && filterVal !== '0') sel.value = filterVal;
             document.getElementById('addKeyModal').classList.add('open');
             setTimeout(() => document.getElementById('addKeyInput').focus(), 100);
-            // Auto-fetch models for selected channel
-            fetchModelsForKey();
-            document.getElementById('addKeyChannel').onchange = fetchModelsForKey;
         }
         function closeAddKeyModal() {
             document.getElementById('addKeyModal').classList.remove('open');
@@ -1322,7 +1310,7 @@
             overlay.classList.add('open');
 
             try {
-                const res = await fetch(API_BASE + '/models?key=' + encodeURIComponent(key) + '&channel=' + channelID);
+                const res = await fetch(API_BASE + '/models?channel=' + channelID);
                 if (!res.ok) {
                     let msg = `获取模型失败 (HTTP ${res.status})`;
                     try { const e = await res.json(); if (e.error) msg = e.error.message || e.error; } catch(_){}

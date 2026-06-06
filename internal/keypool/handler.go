@@ -568,34 +568,36 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := r.URL.Query().Get("key")
 	channelID := 0
 	fmt.Sscanf(r.URL.Query().Get("channel"), "%d", &channelID)
 
-	if key == "" {
-		http.Error(w, "Missing key query parameter", http.StatusBadRequest)
-		return
-	}
-
-	var modelsURL string
+	// Resolve channel
+	var channel *ChannelInfo
 	if channelID > 0 {
-		// Use specific channel
 		channels, _ := h.pool.GetAllChannels()
 		for _, c := range channels {
 			if c.ID == channelID {
-				modelsURL = modelsURLFromBase(c.BaseURL)
+				channel = &c
 				break
 			}
 		}
 	}
-	if modelsURL == "" {
-		// Default channel
-		ch, _ := h.pool.GetDefaultChannel()
-		if ch != nil {
-			modelsURL = modelsURLFromBase(ch.BaseURL)
-		}
+	if channel == nil {
+		channel, _ = h.pool.GetDefaultChannel()
+	}
+	if channel == nil {
+		http.Error(w, `{"error":"No channel found"}`, http.StatusNotFound)
+		return
 	}
 
+	// Use upstream key from pool (not proxy key from client)
+	key, _, err := h.pool.GetKey(channel.ID)
+	if err != nil {
+		http.Error(w, `{"error":"No upstream key available for this channel"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	modelsURL := modelsURLFromBase(channel.BaseURL)
 	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
@@ -615,7 +617,7 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(resp.Body)
 
 	// Cache models for this channel (populated when user clicks refresh in UI).
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 && channelID > 0 {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		var parsed struct {
 			Data []struct {
 				ID string `json:"id"`
@@ -627,7 +629,7 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 				ids = append(ids, m.ID)
 			}
 			h.modelMu.Lock()
-			h.modelCache[channelID] = &modelCache{models: ids, updated: time.Now()}
+			h.modelCache[channel.ID] = &modelCache{models: ids, updated: time.Now()}
 			h.modelMu.Unlock()
 		}
 	}
