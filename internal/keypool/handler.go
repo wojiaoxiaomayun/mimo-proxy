@@ -37,16 +37,24 @@ func testPayload(model string) []byte {
 //go:embed index.html
 var htmlEmbed embed.FS
 
+type modelCache struct {
+	models  []string
+	updated time.Time
+}
+
 type Handler struct {
 	pool       *KeyPool
 	keyFails   map[string]int
 	keyFailsMu sync.RWMutex
+	modelCache map[int]*modelCache // channelID → cached models
+	modelMu    sync.RWMutex
 }
 
 func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	h := &Handler{
-		pool:     pool,
-		keyFails: make(map[string]int),
+		pool:       pool,
+		keyFails:   make(map[string]int),
+		modelCache: make(map[int]*modelCache),
 	}
 
 	mux := http.NewServeMux()
@@ -122,8 +130,8 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch models live from upstream /v1/models and validate/swap model.
-	models := h.fetchModels(channel, key)
+	// Use cached models for validation (populated by user via /models endpoint).
+	models := h.getCachedModels(channel.ID)
 	body = h.swapModelIfNeeded(body, models, defaultModel)
 
 	req, err := http.NewRequest(http.MethodPost, channel.BaseURL, bytes.NewReader(body))
@@ -433,9 +441,8 @@ func modelsURLFromBase(baseURL string) string {
 	return u.Scheme + "://" + u.Host + "/v1/models"
 }
 
-// fetchModels calls the upstream /v1/models and returns the model ID list.
-func (h *Handler) fetchModels(channel *ChannelInfo, key string) []string {
-	modelsURL := modelsURLFromBase(channel.BaseURL)
+// refreshModels fetches /v1/models from upstream and caches the result (1h TTL).
+func (h *Handler) refreshModels(channelID int, modelsURL string, key string) []string {
 	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
 	if err != nil {
 		return nil
@@ -461,13 +468,29 @@ func (h *Handler) fetchModels(channel *ChannelInfo, key string) []string {
 	for _, m := range parsed.Data {
 		models = append(models, m.ID)
 	}
+
+	h.modelMu.Lock()
+	h.modelCache[channelID] = &modelCache{models: models, updated: time.Now()}
+	h.modelMu.Unlock()
+
 	return models
 }
 
-// swapModelIfNeeded replaces the model in the request body if it's not in the channel's model list.
+// getCachedModels returns cached models for a channel, or nil if not cached / expired (1h).
+func (h *Handler) getCachedModels(channelID int) []string {
+	h.modelMu.RLock()
+	defer h.modelMu.RUnlock()
+	entry, ok := h.modelCache[channelID]
+	if !ok || time.Since(entry.updated) > time.Hour {
+		return nil
+	}
+	return entry.models
+}
+
+// swapModelIfNeeded replaces the model if it's not in the cached list.
 func (h *Handler) swapModelIfNeeded(body []byte, models []string, defaultModel string) []byte {
-	if defaultModel == "" || len(models) == 0 {
-		return body
+	if len(models) == 0 || defaultModel == "" {
+		return body // no cache or no default → pass through
 	}
 	var parsed map[string]interface{}
 	if json.Unmarshal(body, &parsed) != nil {
@@ -479,10 +502,9 @@ func (h *Handler) swapModelIfNeeded(body []byte, models []string, defaultModel s
 	}
 	for _, m := range models {
 		if m == reqModel {
-			return body // valid model, pass through
+			return body
 		}
 	}
-	// Invalid model → swap to default
 	parsed["model"] = defaultModel
 	newBody, _ := json.Marshal(parsed)
 	return newBody
@@ -581,6 +603,25 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+
+	// Cache models for this channel (populated when user clicks refresh in UI).
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && channelID > 0 {
+		var parsed struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(body, &parsed) == nil {
+			var ids []string
+			for _, m := range parsed.Data {
+				ids = append(ids, m.ID)
+			}
+			h.modelMu.Lock()
+			h.modelCache[channelID] = &modelCache{models: ids, updated: time.Now()}
+			h.modelMu.Unlock()
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
