@@ -37,24 +37,16 @@ func testPayload(model string) []byte {
 //go:embed index.html
 var htmlEmbed embed.FS
 
-type modelCacheEntry struct {
-	models   []string
-	fetched  time.Time
-}
-
 type Handler struct {
 	pool       *KeyPool
 	keyFails   map[string]int
 	keyFailsMu sync.RWMutex
-	modelCache map[int]*modelCacheEntry // channelID → cached models
-	modelMu    sync.RWMutex
 }
 
 func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	h := &Handler{
-		pool:       pool,
-		keyFails:   make(map[string]int),
-		modelCache: make(map[int]*modelCacheEntry),
+		pool:     pool,
+		keyFails: make(map[string]int),
 	}
 
 	mux := http.NewServeMux()
@@ -130,18 +122,9 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure model cache is populated (first call sync, subsequent async).
-	h.modelMu.RLock()
-	_, cached := h.modelCache[channel.ID]
-	h.modelMu.RUnlock()
-	if !cached {
-		h.refreshModels(channel, key) // sync for first call
-	} else {
-		go h.getChannelModels(channel, key) // async refresh if stale
-	}
-
-	// Validate model: if not in channel's model list, swap to key's default model.
-	body = h.swapModelIfNeeded(body, channel.ID, defaultModel)
+	// Fetch models live from upstream /v1/models and validate/swap model.
+	models := h.fetchModels(channel, key)
+	body = h.swapModelIfNeeded(body, models, defaultModel)
 
 	req, err := http.NewRequest(http.MethodPost, channel.BaseURL, bytes.NewReader(body))
 	if err != nil {
@@ -450,30 +433,12 @@ func modelsURLFromBase(baseURL string) string {
 	return u.Scheme + "://" + u.Host + "/v1/models"
 }
 
-// getChannelModels returns cached models for a channel, refreshing if stale (10min TTL).
-func (h *Handler) getChannelModels(channel *ChannelInfo, key string) []string {
-	h.modelMu.RLock()
-	entry, ok := h.modelCache[channel.ID]
-	h.modelMu.RUnlock()
-
-	if ok && time.Since(entry.fetched) < 10*time.Minute {
-		return entry.models
-	}
-
-	// Refresh in background
-	go h.refreshModels(channel, key)
-
-	if ok {
-		return entry.models // return stale while refreshing
-	}
-	return nil
-}
-
-func (h *Handler) refreshModels(channel *ChannelInfo, key string) {
+// fetchModels calls the upstream /v1/models and returns the model ID list.
+func (h *Handler) fetchModels(channel *ChannelInfo, key string) []string {
 	modelsURL := modelsURLFromBase(channel.BaseURL)
 	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
 	if err != nil {
-		return
+		return nil
 	}
 	req.Header.Set("api-key", key)
 	req.Header.Set("Authorization", "Bearer "+key)
@@ -481,7 +446,7 @@ func (h *Handler) refreshModels(channel *ChannelInfo, key string) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return
+		return nil
 	}
 	defer resp.Body.Close()
 
@@ -496,31 +461,12 @@ func (h *Handler) refreshModels(channel *ChannelInfo, key string) {
 	for _, m := range parsed.Data {
 		models = append(models, m.ID)
 	}
-
-	h.modelMu.Lock()
-	h.modelCache[channel.ID] = &modelCacheEntry{models: models, fetched: time.Now()}
-	h.modelMu.Unlock()
-}
-
-// isValidModel checks if a model is in the channel's cached model list.
-func (h *Handler) isValidModel(channelID int, model string) bool {
-	h.modelMu.RLock()
-	entry, ok := h.modelCache[channelID]
-	h.modelMu.RUnlock()
-	if !ok || len(entry.models) == 0 {
-		return false // no cache = treat as invalid so default is used
-	}
-	for _, m := range entry.models {
-		if m == model {
-			return true
-		}
-	}
-	return false
+	return models
 }
 
 // swapModelIfNeeded replaces the model in the request body if it's not in the channel's model list.
-func (h *Handler) swapModelIfNeeded(body []byte, channelID int, defaultModel string) []byte {
-	if defaultModel == "" {
+func (h *Handler) swapModelIfNeeded(body []byte, models []string, defaultModel string) []byte {
+	if defaultModel == "" || len(models) == 0 {
 		return body
 	}
 	var parsed map[string]interface{}
@@ -528,10 +474,15 @@ func (h *Handler) swapModelIfNeeded(body []byte, channelID int, defaultModel str
 		return body
 	}
 	reqModel, _ := parsed["model"].(string)
-	if reqModel == "" || h.isValidModel(channelID, reqModel) {
+	if reqModel == "" {
 		return body
 	}
-	// Swap to default model
+	for _, m := range models {
+		if m == reqModel {
+			return body // valid model, pass through
+		}
+	}
+	// Invalid model → swap to default
 	parsed["model"] = defaultModel
 	newBody, _ := json.Marshal(parsed)
 	return newBody
