@@ -113,7 +113,13 @@ response = client.chat.completions.create(
 ├── internal/keypool/
 │   ├── keypool.go                 数据库层（channels/api_keys/proxy_keys/request_logs/settings）
 │   ├── handler.go                 HTTP 路由与处理
-│   └── index.html                 前端页面（嵌入到二进制）
+│   └── ui/                        前端页面（嵌入到二进制）
+│       ├── style.css              共享样式
+│       ├── common.js              共享脚本（图标、工具函数）
+│       ├── keys.html              Key 管理页
+│       ├── channels.html          渠道管理页
+│       ├── logs.html              请求日志页
+│       └── settings.html          设置页
 ├── go.mod
 └── keys.db                        SQLite 数据库（运行时生成）
 ```

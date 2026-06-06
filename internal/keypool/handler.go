@@ -34,8 +34,8 @@ func testPayload(model string) []byte {
 	return b
 }
 
-//go:embed index.html
-var htmlEmbed embed.FS
+//go:embed ui/*
+var uiEmbed embed.FS
 
 type modelCache struct {
 	models  []string
@@ -58,8 +58,14 @@ func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", h.Index)
-	mux.HandleFunc("/ui", h.Index)
+	mux.HandleFunc("/", h.UIRedirect)
+	mux.HandleFunc("/ui", h.UIRedirect)
+	mux.HandleFunc("/ui/keys", h.UIKeys)
+	mux.HandleFunc("/ui/channels", h.UIChannels)
+	mux.HandleFunc("/ui/logs", h.UILogs)
+	mux.HandleFunc("/ui/settings", h.UISettings)
+	mux.HandleFunc("/ui/style.css", h.UIStaticCSS)
+	mux.HandleFunc("/ui/common.js", h.UIStaticJS)
 	mux.HandleFunc("/v1/chat/completions", h.ChatCompletions)
 	mux.HandleFunc("/v1/models", h.V1Models)
 	mux.HandleFunc("/c/{channel}/v1/chat/completions", h.ChatCompletions)
@@ -86,8 +92,48 @@ func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	return mux
 }
 
-func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
-	data, err := htmlEmbed.ReadFile("index.html")
+func (h *Handler) UIRedirect(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/ui/keys", http.StatusFound)
+}
+
+func (h *Handler) UIKeys(w http.ResponseWriter, r *http.Request) {
+	h.serveUIPage(w, "ui/keys.html")
+}
+
+func (h *Handler) UIChannels(w http.ResponseWriter, r *http.Request) {
+	h.serveUIPage(w, "ui/channels.html")
+}
+
+func (h *Handler) UILogs(w http.ResponseWriter, r *http.Request) {
+	h.serveUIPage(w, "ui/logs.html")
+}
+
+func (h *Handler) UISettings(w http.ResponseWriter, r *http.Request) {
+	h.serveUIPage(w, "ui/settings.html")
+}
+
+func (h *Handler) UIStaticCSS(w http.ResponseWriter, r *http.Request) {
+	data, err := uiEmbed.ReadFile("ui/style.css")
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Write(data)
+}
+
+func (h *Handler) UIStaticJS(w http.ResponseWriter, r *http.Request) {
+	data, err := uiEmbed.ReadFile("ui/common.js")
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Write(data)
+}
+
+func (h *Handler) serveUIPage(w http.ResponseWriter, path string) {
+	data, err := uiEmbed.ReadFile(path)
 	if err != nil {
 		http.Error(w, "Failed to load page", http.StatusInternalServerError)
 		return

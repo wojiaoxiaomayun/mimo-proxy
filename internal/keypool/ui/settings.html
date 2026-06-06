@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiMo Proxy - 设置</title>
+    <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-brand">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>
+                MiMo Proxy
+            </div>
+        </div>
+        <nav class="sidebar-nav">
+            <a class="nav-item" href="/ui/keys">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>
+                Key 管理
+            </a>
+            <a class="nav-item" href="/ui/channels">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></g></svg>
+                渠道
+            </a>
+            <a class="nav-item" href="/ui/logs">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 12h-5m5-4h-5m9 9V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></g></svg>
+                日志
+            </a>
+            <a class="nav-item active" href="/ui/settings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0a2.34 2.34 0 0 0 3.319 1.915a2.34 2.34 0 0 1 2.33 4.033a2.34 2.34 0 0 0 0 3.831a2.34 2.34 0 0 1-2.33 4.033a2.34 2.34 0 0 0-3.319 1.915a2.34 2.34 0 0 1-4.659 0a2.34 2.34 0 0 0-3.32-1.915a2.34 2.34 0 0 1-2.33-4.033a2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g></svg>
+                设置
+            </a>
+        </nav>
+        <div class="sidebar-footer">MiMo Key Pool Proxy</div>
+    </aside>
+
+    <div class="main">
+        <div class="main-header">
+            <h1>设置</h1>
+            <p>健康检查与代理 Key 管理</p>
+        </div>
+        <div class="main-body">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">健康检查</div>
+                    <div class="card-description">测试所有启用的 Key，连续失败指定次数后自动禁用</div>
+                </div>
+                <div class="card-content">
+                    <div class="settings-group">
+                        <div class="field-group">
+                            <label for="healthThreshold">连续失败阈值</label>
+                            <input type="text" id="healthThreshold" value="3" placeholder="3" style="max-width:6rem;">
+                            <div class="field-hint">单个 Key 连续失败此次数后将自动禁用</div>
+                        </div>
+                        <div class="field-actions">
+                            <button class="btn btn-primary" id="healthCheckBtn" onclick="runHealthCheck()">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/></svg>
+                                开始检查
+                            </button>
+                        </div>
+                    </div>
+                    <div id="healthResults" style="margin-top:1rem;"></div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:1.25rem;">
+                <div class="card-header">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div class="card-title">代理 Key（sk-xxx）</div>
+                        <button class="btn btn-primary btn-sm" onclick="openGenProxyKeyModal()">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
+                            生成
+                        </button>
+                    </div>
+                    <div class="card-description" style="margin-top:0.5rem;">客户端调用本代理时须携带此 Key 作为 <code>Authorization: Bearer sk-xxx</code></div>
+                </div>
+                <div class="card-content">
+                    <div id="proxyKeysGrid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generate Proxy Key Modal -->
+    <div class="modal-overlay" id="genProxyKeyModal">
+        <div class="modal" style="max-width:24rem;" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">生成代理 Key</div>
+                <button class="modal-close" onclick="closeGenProxyKeyModal()" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="field-group">
+                    <label>备注</label>
+                    <input type="text" id="genProxyKeyNote" placeholder="例如：张三的项目" style="width:100%;">
+                    <div class="field-hint">标识此 Key 的用途，方便管理</div>
+                </div>
+                <div id="genProxyKeyResult" style="margin-top:0.75rem;"></div>
+                <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
+                    <button class="btn btn-outline" onclick="closeGenProxyKeyModal()" style="flex:1;">关闭</button>
+                    <button class="btn btn-primary" id="genProxyKeySubmit" onclick="submitGenProxyKey()" style="flex:1;">生成</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="/ui/common.js"></script>
+    <script>
+        /* ========== Health Check ========== */
+
+        async function runHealthCheck() {
+            const threshold = parseInt(document.getElementById('healthThreshold').value) || 3;
+            const btn = document.getElementById('healthCheckBtn');
+            const container = document.getElementById('healthResults');
+
+            btn.disabled = true;
+            btn.textContent = '检查中…';
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>正在检查所有 Key…</div>';
+
+            try {
+                const res = await fetch(API_BASE + '/health-check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ threshold })
+                });
+                const data = await res.json();
+                renderHealthResults(data, threshold);
+            } catch (e) {
+                container.innerHTML = `<div class="result-error-banner">
+                    ${ICO.cross}
+                    <span>检查失败：${e.message}</span></div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `${ICO.wrench}开始检查`;
+            }
+        }
+
+        function renderHealthResults(data, threshold) {
+            const container = document.getElementById('healthResults');
+            const results = data.results || [];
+
+            if (results.length === 0) {
+                container.innerHTML = '<p style="font-size:0.875rem;color:hsl(var(--muted-foreground));text-align:center;padding:1.5rem 0;">没有启用的 Key</p>';
+                return;
+            }
+
+            const summary = data.disabled_count > 0
+                ? `<div class="result-error-banner" style="margin-bottom:0.75rem;">${ICO.alert}<span>已自动禁用 ${data.disabled_count} 个不可用 Key</span></div>`
+                : `<div class="result-success-banner" style="margin-bottom:0.75rem;">${ICO.check}<span>所有 Key 均可用</span></div>`;
+
+            let rows = '';
+            for (const r of results) {
+                const statusIcon = r.status === 'ok'
+                    ? '<span style="color:hsl(142 76% 36%);font-weight:600;">✓ 通过</span>'
+                    : '<span style="color:hsl(0 84.2% 60.2%);font-weight:600;">✗ 失败</span>';
+                const action = r.disabled
+                    ? '<span class="badge badge-warning"><span class="badge-dot"></span>已禁用</span>'
+                    : (r.status === 'ok' ? '<span style="color:hsl(var(--muted-foreground));font-size:0.8125rem;">-</span>' : '');
+
+                rows += `<tr>
+                    <td class="td-key">${r.key}</td>
+                    <td>${statusIcon}</td>
+                    <td class="td-usage">${r.latency || '-'} ms</td>
+                    <td>${r.error || ''}</td>
+                    <td>${action}</td>
+                </tr>`;
+            }
+
+            container.innerHTML = summary + `<div class="table-wrapper"><table>
+                <thead><tr><th>Key</th><th>状态</th><th>延迟</th><th>错误信息</th><th>操作</th></tr></thead>
+                <tbody>${rows}</tbody></table></div>`;
+        }
+
+        /* ========== Proxy Keys ========== */
+
+        async function loadProxyKeys() {
+            try {
+                const res = await fetch(API_BASE + '/proxy-keys');
+                const data = await res.json();
+                renderProxyKeys(data.keys || []);
+            } catch (e) { console.error('loadProxyKeys:', e); }
+        }
+
+        function renderProxyKeys(keys) {
+            const grid = document.getElementById('proxyKeysGrid');
+            if (!keys || keys.length === 0) {
+                grid.innerHTML = `<div class="empty-state" style="padding:2rem 0;">
+                    <p>暂无代理 Key</p><p class="empty-hint">点击「生成」创建客户端调用凭证</p></div>`;
+                return;
+            }
+            let rows = '';
+            for (const k of keys) {
+                const badge = k.enabled
+                    ? '<span class="badge badge-success"><span class="badge-dot"></span>启用</span>'
+                    : '<span class="badge badge-warning"><span class="badge-dot"></span>禁用</span>';
+                const toggle = k.enabled
+                    ? `<button class="btn btn-sm btn-ghost" data-tip="禁用" onclick="toggleProxyKey('${k.key}', false)">${ICO.toggleOn}</button>`
+                    : `<button class="btn btn-sm btn-ghost" data-tip="启用" onclick="toggleProxyKey('${k.key}', true)">${ICO.toggleOff}</button>`;
+                rows += `<tr>
+                    <td class="td-key" title="${k.key}" style="max-width:320px;">${k.key}</td>
+                    <td>${k.note || '-'}</td>
+                    <td>${badge}</td>
+                    <td class="td-date">${formatDate(k.created_at)}</td>
+                    <td class="td-actions"><div class="btn-group">
+                        <button class="btn btn-sm btn-ghost" data-tip="复制" onclick="copyKey('${k.key}')">${ICO.copy}</button>
+                        ${toggle}
+                        <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeProxyKey('${k.key}')">${ICO.trash}</button>
+                    </div></td>
+                </tr>`;
+            }
+            grid.innerHTML = `<div class="table-wrapper"><table><thead><tr>
+                <th>Key</th><th>备注</th><th>状态</th><th>创建时间</th><th style="text-align:right">操作</th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
+        }
+
+        function openGenProxyKeyModal() {
+            document.getElementById('genProxyKeyNote').value = '';
+            document.getElementById('genProxyKeyResult').innerHTML = '';
+            document.getElementById('genProxyKeySubmit').style.display = '';
+            document.getElementById('genProxyKeyModal').classList.add('open');
+            setTimeout(() => document.getElementById('genProxyKeyNote').focus(), 100);
+        }
+        function closeGenProxyKeyModal() {
+            document.getElementById('genProxyKeyModal').classList.remove('open');
+        }
+
+        async function submitGenProxyKey() {
+            const note = document.getElementById('genProxyKeyNote').value.trim();
+            try {
+                const res = await fetch(API_BASE + '/proxy-keys', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'generate', note})
+                });
+                const data = await res.json();
+                if (data.key) {
+                    await loadProxyKeys();
+                    document.getElementById('genProxyKeySubmit').style.display = 'none';
+                    document.getElementById('genProxyKeyResult').innerHTML = `
+                        <div class="result-success-banner">${ICO.check}<span>已生成</span></div>
+                        <div style="margin-bottom:0.5rem;">
+                            <label style="font-size:0.8125rem;font-weight:500;margin-bottom:0.25rem;display:block;">Key</label>
+                            <div style="display:flex;gap:0.5rem;align-items:center;">
+                                <code style="flex:1;font-size:0.8125rem;background:hsl(var(--muted));padding:0.5rem 0.75rem;border-radius:var(--radius);word-break:break-all;">${data.key}</code>
+                                <button class="btn btn-sm btn-primary" onclick="navigator.clipboard.writeText('${data.key}').then(()=>showToast('已复制'))">复制</button>
+                            </div>
+                        </div>`;
+                }
+            } catch (e) { alert('生成失败: ' + e); }
+        }
+
+        async function toggleProxyKey(key, enable) {
+            try {
+                await fetch(API_BASE + '/proxy-keys', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action: enable ? 'enable' : 'disable', key})
+                });
+                await loadProxyKeys();
+            } catch (e) { alert('操作失败: ' + e); }
+        }
+
+        async function removeProxyKey(key) {
+            if (!confirm('确定删除此代理 Key？')) return;
+            try {
+                await fetch(API_BASE + '/proxy-keys', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'remove', key})
+                });
+                await loadProxyKeys();
+            } catch (e) { alert('删除失败: ' + e); }
+        }
+
+        function copyKey(key) {
+            navigator.clipboard.writeText(key).then(() => showToast('已复制'));
+        }
+
+        /* ========== Init ========== */
+        initModalClose('genProxyKeyModal');
+        loadProxyKeys();
+    </script>
+</body>
+</html>
