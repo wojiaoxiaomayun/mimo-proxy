@@ -570,6 +570,12 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 
 	channelID := 0
 	fmt.Sscanf(r.URL.Query().Get("channel"), "%d", &channelID)
+	key := r.URL.Query().Get("key")
+
+	if key == "" {
+		http.Error(w, `{"error":"Missing key parameter"}`, http.StatusBadRequest)
+		return
+	}
 
 	// Resolve channel
 	var channel *ChannelInfo
@@ -587,13 +593,6 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	}
 	if channel == nil {
 		http.Error(w, `{"error":"No channel found"}`, http.StatusNotFound)
-		return
-	}
-
-	// Use upstream key from pool (not proxy key from client)
-	key, _, err := h.pool.GetKey(channel.ID)
-	if err != nil {
-		http.Error(w, `{"error":"No upstream key available for this channel"}`, http.StatusServiceUnavailable)
 		return
 	}
 

@@ -775,12 +775,14 @@
 
         async function fetchModelsForKey() {
             const channelID = document.getElementById('addKeyChannel').value;
+            const key = document.getElementById('addKeyInput').value.trim();
             const sel = document.getElementById('addKeyModel');
             const btn = document.getElementById('refreshModelsBtn');
+            if (!key) { showToast('请先输入 Key', true); return; }
             sel.innerHTML = '<option value="">加载中…</option>';
             btn.disabled = true;
             try {
-                const res = await fetch(API_BASE + '/models?channel=' + channelID);
+                const res = await fetch(API_BASE + '/models?channel=' + channelID + '&key=' + encodeURIComponent(key));
                 const data = await res.json();
                 let opts = '<option value="">不指定（透传原始模型）</option>';
                 if (data.data && data.data.length > 0) {
@@ -1310,7 +1312,7 @@
             overlay.classList.add('open');
 
             try {
-                const res = await fetch(API_BASE + '/models?channel=' + channelID);
+                const res = await fetch(API_BASE + '/models?channel=' + channelID + '&key=' + encodeURIComponent(key));
                 if (!res.ok) {
                     let msg = `获取模型失败 (HTTP ${res.status})`;
                     try { const e = await res.json(); if (e.error) msg = e.error.message || e.error; } catch(_){}
