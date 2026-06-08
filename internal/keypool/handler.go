@@ -208,6 +208,10 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Track key health: 401/403 indicate a bad key.
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		h.recordKeyFailure(key)
+		// In failover mode, disable the key and clear failover_key immediately.
+		if channel.KeyMode == "failover" {
+			h.pool.RotateFailoverKey(channel.ID, key)
+		}
 	} else {
 		h.resetKeyFailures(key)
 	}
@@ -319,8 +323,46 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// Build channel lookup map for enriched response.
+		channels, _ := h.pool.GetAllChannels()
+		chMap := make(map[int]*ChannelInfo)
+		for i := range channels {
+			chMap[channels[i].ID] = &channels[i]
+		}
+		type KeyWithChannel struct {
+			KeyInfo
+			ChannelName string `json:"channel_name"`
+			IsActive    bool   `json:"is_active"`
+			IsPinned    bool   `json:"is_pinned"`
+		}
+		// Find the "next to use" key per channel (lowest usage_count when no pin).
+		type chActive struct{ minUsage, minID int; key string }
+		chBest := make(map[int]*chActive)
+		for _, k := range keys {
+			if !k.Enabled {
+				continue
+			}
+			b, ok := chBest[k.ChannelID]
+			if !ok || k.UsageCount < b.minUsage || (k.UsageCount == b.minUsage && k.ID < b.minID) {
+				chBest[k.ChannelID] = &chActive{minUsage: k.UsageCount, minID: k.ID, key: k.Key}
+			}
+		}
+		var result []KeyWithChannel
+		for _, k := range keys {
+			kwc := KeyWithChannel{KeyInfo: k}
+			if ch, ok := chMap[k.ChannelID]; ok {
+				kwc.ChannelName = ch.Name
+				if ch.PinnedKey != "" {
+					kwc.IsActive = ch.PinnedKey == k.Key
+					kwc.IsPinned = ch.PinnedKey == k.Key
+				} else if b, ok := chBest[k.ChannelID]; ok {
+					kwc.IsActive = b.key == k.Key
+				}
+			}
+			result = append(result, kwc)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"keys": keys})
+		json.NewEncoder(w).Encode(map[string]interface{}{"keys": result})
 		return
 	}
 
@@ -353,6 +395,10 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 			err = h.pool.Disable(req.Key)
 		case "update-note":
 			err = h.pool.UpdateNote(req.Key, req.Note)
+		case "pin-key":
+			err = h.pool.PinKey(req.ChannelID, req.Key)
+		case "unpin-key":
+			err = h.pool.UnpinKey(req.ChannelID)
 		default:
 			http.Error(w, fmt.Sprintf("Unknown action: %s", req.Action), http.StatusBadRequest)
 			return
@@ -867,11 +913,12 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			Action string `json:"action"`
-			ID     int    `json:"id"`
-			Name   string `json:"name"`
-			Prefix string `json:"prefix"`
+			Action  string `json:"action"`
+			ID      int    `json:"id"`
+			Name    string `json:"name"`
+			Prefix  string `json:"prefix"`
 			BaseURL string `json:"base_url"`
+			KeyMode string `json:"key_mode"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
@@ -887,6 +934,16 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		case "update":
 			if err := h.pool.UpdateChannel(req.ID, req.Name, req.Prefix, req.BaseURL); err != nil {
+				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				return
+			}
+			// Also update key_mode if provided.
+			if req.KeyMode != "" {
+				h.pool.SetKeyMode(req.ID, req.KeyMode)
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case "set-key-mode":
+			if err := h.pool.SetKeyMode(req.ID, req.KeyMode); err != nil {
 				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 				return
 			}

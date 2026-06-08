@@ -203,7 +203,7 @@
                 const res = await fetch(API_BASE + '/stats');
                 const data = await res.json();
                 document.getElementById('totalCalls').textContent = (data.total_calls || 0).toLocaleString();
-                document.getElementById('totalTokens').textContent = (data.total_tokens || 0).toLocaleString();
+                document.getElementById('totalTokens').textContent = formatTokens(data.total_tokens);
                 document.getElementById('keyCount').textContent = (data.enabled_keys || 0) + (data.disabled_keys || 0);
             } catch (e) { console.error('fetchStats:', e); }
         }
@@ -229,12 +229,17 @@
                 rows += `<tr>
                     <td class="td-key" title="${k.key}">${maskKey(k.key)}</td>
                     <td>${noteDisplay}</td>
+                    <td style="font-size:0.8125rem;white-space:nowrap;">${k.channel_name || '-'}</td>
+                    <td>${k.is_active ? '<span class="badge badge-success"><span class="badge-dot"></span>使用中</span>' : ''}</td>
                     <td>${badge}</td>
                     <td class="td-usage">${k.usage_count}</td>
-                    <td class="td-usage" style="font-weight:600;">${k.total_tokens.toLocaleString()}</td>
+                    <td class="td-usage" style="font-weight:600;">${formatTokens(k.total_tokens)}</td>
                     <td class="td-date">${formatDate(k.created_at)}</td>
                     <td class="td-actions"><div class="btn-group">
                         <button class="btn btn-sm btn-ghost" data-tip="测试" onclick="openTestModal('${k.key}', ${k.channel_id})">${ICO.play}</button>
+                        ${k.is_pinned
+                            ? `<button class="btn btn-sm btn-ghost" data-tip="取消固定" onclick="unpinKey(${k.channel_id})">${ICO.pin}</button>`
+                            : `<button class="btn btn-sm btn-ghost" data-tip="设为固定" onclick="pinKey(${k.channel_id},'${k.key}')">${ICO.pinOff}</button>`}
                         <button class="btn btn-sm btn-ghost" data-tip="编辑" onclick='openEditKeyModal(${JSON.stringify(k).replace(/'/g,"&#39;")})'>${ICO.pencil}</button>
                         ${toggle}
                         <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeKey('${k.key}')">${ICO.trash}</button>
@@ -242,7 +247,7 @@
                 </tr>`;
             }
             return `<div class="table-wrapper"><table><thead><tr>
-                <th>Key</th><th>备注</th><th>状态</th><th>调用</th><th>Total</th><th>创建时间</th><th style="text-align:right">操作</th>
+                <th>Key</th><th>备注</th><th>渠道</th><th>使用</th><th>状态</th><th>调用</th><th>Total</th><th>创建时间</th><th style="text-align:right">操作</th>
             </tr></thead><tbody>${rows}</tbody></table></div>`;
         }
 
@@ -387,6 +392,20 @@
             } catch (e) { alert('删除失败: ' + e); }
         }
 
+        async function pinKey(channelID, key) {
+            try {
+                const res = await fetch(API_BASE + '/keys', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action:'pin-key', key, channel_id: channelID}) });
+                if (res.ok) { await fetchKeys(); showToast('已设为当前使用 Key'); }
+            } catch (e) { alert('操作失败: ' + e); }
+        }
+
+        async function unpinKey(channelID) {
+            try {
+                const res = await fetch(API_BASE + '/keys', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action:'unpin-key', channel_id: channelID}) });
+                if (res.ok) { await fetchKeys(); showToast('已取消固定'); }
+            } catch (e) { alert('操作失败: ' + e); }
+        }
+
         /* ========== Test Key Modal ========== */
 
         function closeTestModal() { document.getElementById('testModal').classList.remove('open'); }
@@ -490,10 +509,10 @@
                     <div class="result-row"><span class="result-label">服务延迟</span><span class="result-value">${data.latency} ms</span></div>
                     <div class="result-row"><span class="result-label">网络往返</span><span class="result-value">${netMs} ms</span></div>
                     ${sep}
-                    <div class="result-row"><span class="result-label">Prompt Tokens</span><span class="result-value">${u.prompt_tokens??'-'}</span></div>
-                    <div class="result-row"><span class="result-label">Completion Tokens</span><span class="result-value">${u.completion_tokens??'-'}</span></div>
-                    <div class="result-row"><span class="result-label">Reasoning Tokens</span><span class="result-value">${cd.reasoning_tokens??'-'}</span></div>
-                    <div class="result-row"><span class="result-label">Total Tokens</span><span class="result-value" style="font-weight:600;">${u.total_tokens??'-'}</span></div>
+                    <div class="result-row"><span class="result-label">Prompt Tokens</span><span class="result-value">${formatTokens(u.prompt_tokens)}</span></div>
+                    <div class="result-row"><span class="result-label">Completion Tokens</span><span class="result-value">${formatTokens(u.completion_tokens)}</span></div>
+                    <div class="result-row"><span class="result-label">Reasoning Tokens</span><span class="result-value">${formatTokens(cd.reasoning_tokens)}</span></div>
+                    <div class="result-row"><span class="result-label">Total Tokens</span><span class="result-value" style="font-weight:600;">${formatTokens(u.total_tokens)}</span></div>
                     ${sep}
                     <div style="font-size:0.8125rem;font-weight:500;margin-bottom:0.5rem;">回复内容</div>
                     <div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));background:hsl(var(--muted));padding:0.75rem;border-radius:var(--radius);line-height:1.6;white-space:pre-wrap;word-break:break-word;">${(ch.message&&ch.message.content)||'(empty)'}</div>

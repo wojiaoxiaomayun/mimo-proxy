@@ -31,6 +31,8 @@ type ChannelInfo struct {
 	BaseURL   string `json:"base_url"`
 	Enabled   bool   `json:"enabled"`
 	IsDefault bool   `json:"is_default"`
+	PinnedKey string `json:"pinned_key"`
+	KeyMode   string `json:"key_mode"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -89,6 +91,9 @@ func New(dbPath, defaultURL string) (*KeyPool, error) {
 		"ALTER TABLE api_keys ADD COLUMN channel_id INTEGER DEFAULT 0",
 		"ALTER TABLE api_keys ADD COLUMN default_model TEXT DEFAULT ''",
 		"ALTER TABLE channels ADD COLUMN is_default INTEGER DEFAULT 0",
+		"ALTER TABLE channels ADD COLUMN pinned_key TEXT DEFAULT ''",
+		"ALTER TABLE channels ADD COLUMN key_mode TEXT DEFAULT 'round-robin'",
+		"ALTER TABLE channels ADD COLUMN failover_key TEXT DEFAULT ''",
 		"ALTER TABLE request_logs ADD COLUMN request_body TEXT DEFAULT ''",
 		"ALTER TABLE request_logs ADD COLUMN response_body TEXT DEFAULT ''",
 	} {
@@ -161,20 +166,87 @@ func (p *KeyPool) GetKey(channelID int) (key string, defaultModel string, err er
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var enabled bool
+	var pinnedKey, keyMode string
+	p.db.QueryRow(`SELECT COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin') FROM channels WHERE id = ?`, channelID).Scan(&pinnedKey, &keyMode)
+
+	// Pinned key always takes priority (manual pin overrides mode).
+	if pinnedKey != "" {
+		var dm string
+		var enabled bool
+		if err := p.db.QueryRow(`SELECT COALESCE(default_model,''), enabled FROM api_keys WHERE key = ?`, pinnedKey).Scan(&dm, &enabled); err == nil && enabled {
+			return pinnedKey, dm, nil
+		}
+	}
+
+	// Failover mode: prefer stored failover_key.
+	if keyMode == "failover" {
+		var fk string
+		p.db.QueryRow(`SELECT COALESCE(failover_key,'') FROM channels WHERE id = ?`, channelID).Scan(&fk)
+		if fk != "" {
+			var dm string
+			var enabled bool
+			if err := p.db.QueryRow(`SELECT COALESCE(default_model,''), enabled FROM api_keys WHERE key = ?`, fk).Scan(&dm, &enabled); err == nil && enabled {
+				return fk, dm, nil
+			}
+		}
+	}
+
+	// Round-robin (or failover fallback): least-used enabled key.
+	var dm string
 	err = p.db.QueryRow(`
-		SELECT key, COALESCE(default_model,''), enabled FROM api_keys 
+		SELECT key, COALESCE(default_model,'') FROM api_keys
 		WHERE enabled = 1 AND channel_id = ?
-		ORDER BY usage_count ASC, id ASC 
+		ORDER BY usage_count ASC, id ASC
 		LIMIT 1
-	`, channelID).Scan(&key, &defaultModel, &enabled)
+	`, channelID).Scan(&key, &dm)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", "", fmt.Errorf("no available API key for channel %d", channelID)
 		}
 		return "", "", err
 	}
-	return key, defaultModel, nil
+
+	// Persist failover key so subsequent requests use the same one.
+	if keyMode == "failover" {
+		p.db.Exec(`UPDATE channels SET failover_key = ? WHERE id = ?`, key, channelID)
+	}
+	return key, dm, nil
+}
+
+// RotateFailoverKey disables the given key and clears the failover_key for the channel.
+// Called when a key fails in failover mode, forcing the next request to pick a new key.
+func (p *KeyPool) RotateFailoverKey(channelID int, failedKey string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.db.Exec(`UPDATE api_keys SET enabled = 0 WHERE key = ?`, failedKey)
+	p.db.Exec(`UPDATE channels SET failover_key = '' WHERE id = ?`, channelID)
+}
+
+// SetKeyMode sets the key selection mode for a channel.
+func (p *KeyPool) SetKeyMode(channelID int, mode string) error {
+	if mode != "round-robin" && mode != "failover" {
+		return fmt.Errorf("invalid key mode: %s", mode)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE channels SET key_mode = ? WHERE id = ?`, mode, channelID)
+	return err
+}
+
+// PinKey sets a key as the preferred key for a channel.
+func (p *KeyPool) PinKey(channelID int, key string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE channels SET pinned_key = ? WHERE id = ?`, key, channelID)
+	return err
+}
+
+// UnpinKey removes the pinned key for a channel.
+func (p *KeyPool) UnpinKey(channelID int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE channels SET pinned_key = '' WHERE id = ?`, channelID)
+	return err
 }
 
 func (p *KeyPool) IncrementUsage(key string, promptTokens, completionTokens, totalTokens int) error {
@@ -317,7 +389,7 @@ func (p *KeyPool) Close() error {
 func (p *KeyPool) GetAllChannels() ([]ChannelInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	rows, err := p.db.Query(`SELECT id, name, prefix, base_url, enabled, is_default, created_at FROM channels ORDER BY is_default DESC, id`)
+	rows, err := p.db.Query(`SELECT id, name, prefix, base_url, enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), created_at FROM channels ORDER BY is_default DESC, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +397,7 @@ func (p *KeyPool) GetAllChannels() ([]ChannelInfo, error) {
 	var channels []ChannelInfo
 	for rows.Next() {
 		var c ChannelInfo
-		if err := rows.Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		channels = append(channels, c)
@@ -337,7 +409,7 @@ func (p *KeyPool) GetChannelByPrefix(prefix string) (*ChannelInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	var c ChannelInfo
-	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, enabled, is_default, created_at FROM channels WHERE prefix = ? AND enabled = 1`, prefix).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.CreatedAt)
+	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), created_at FROM channels WHERE prefix = ? AND enabled = 1`, prefix).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -348,10 +420,10 @@ func (p *KeyPool) GetDefaultChannel() (*ChannelInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	var c ChannelInfo
-	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, enabled, is_default, created_at FROM channels WHERE is_default = 1 AND enabled = 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.CreatedAt)
+	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), created_at FROM channels WHERE is_default = 1 AND enabled = 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &c.CreatedAt)
 	if err != nil {
 		// Fallback: first enabled channel
-		err = p.db.QueryRow(`SELECT id, name, prefix, base_url, enabled, is_default, created_at FROM channels WHERE enabled = 1 ORDER BY id LIMIT 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.CreatedAt)
+		err = p.db.QueryRow(`SELECT id, name, prefix, base_url, enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), created_at FROM channels WHERE enabled = 1 ORDER BY id LIMIT 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &c.CreatedAt)
 	}
 	if err != nil {
 		return nil, err

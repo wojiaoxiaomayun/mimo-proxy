@@ -77,6 +77,14 @@
                     <label>Base URL</label>
                     <input type="text" id="chBaseURL" placeholder="https://api.xiaomimimo.com/v1/chat/completions" style="width:100%;">
                 </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>Key 选择模式</label>
+                    <select id="chKeyMode" style="width:100%;">
+                        <option value="round-robin">轮询 — 均匀分配请求到所有 Key</option>
+                        <option value="failover">故障转移 — 用完一个再换下一个</option>
+                    </select>
+                    <div class="field-hint">轮询模式按使用次数均匀分配；故障转移模式固定使用一个 Key，失败后自动切换</div>
+                </div>
                 <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
                     <button class="btn btn-outline" onclick="closeAddChannelModal()" style="flex:1;">取消</button>
                     <button class="btn btn-primary" onclick="submitAddChannel()" style="flex:1;">添加</button>
@@ -114,12 +122,16 @@
                     ? `<button class="btn btn-sm btn-ghost" data-tip="禁用" onclick="toggleChannel(${c.id}, false)">${ICO.toggleOn}</button>`
                     : `<button class="btn btn-sm btn-ghost" data-tip="启用" onclick="toggleChannel(${c.id}, true)">${ICO.toggleOff}</button>`;
                 const defaultBtn = c.is_default ? '' : `<button class="btn btn-sm btn-ghost" data-tip="设为默认" onclick="setDefaultChannel(${c.id})">${ICO.star}</button>`;
+                const modeLabel = c.key_mode === 'failover'
+                    ? '<span class="badge badge-warning"><span class="badge-dot"></span>故障转移</span>'
+                    : '<span class="badge" style="background:hsl(var(--muted));color:hsl(var(--muted-foreground));">轮询</span>';
                 const proxyUrl = location.origin + '/c/' + c.prefix + '/v1';
                 rows += `<tr>
                     <td style="font-weight:500;">${c.name || '-'}</td>
                     <td style="font-family:monospace;font-size:0.8125rem;"><code>/c/${c.prefix}</code></td>
                     <td class="td-key" title="${c.base_url}" style="max-width:260px;">${c.base_url}</td>
                     <td style="font-family:monospace;font-size:0.8125rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${proxyUrl}">${proxyUrl}</td>
+                    <td>${modeLabel}</td>
                     <td>${badge}</td>
                     <td class="td-actions"><div class="btn-group">
                         <button class="btn btn-sm btn-ghost" data-tip="复制代理URL" onclick="copyProxyUrl('${proxyUrl}')">${ICO.copy}</button>
@@ -131,7 +143,7 @@
                 </tr>`;
             }
             grid.innerHTML = `<div class="table-wrapper"><table><thead><tr>
-                <th>名称</th><th>前缀</th><th>上游 URL</th><th>代理 URL</th><th>状态</th><th style="text-align:right">操作</th>
+                <th>名称</th><th>前缀</th><th>上游 URL</th><th>代理 URL</th><th>模式</th><th>状态</th><th style="text-align:right">操作</th>
             </tr></thead><tbody>${rows}</tbody></table></div>`;
         }
 
@@ -152,6 +164,7 @@
             document.getElementById('chName').value = '';
             document.getElementById('chPrefix').value = '';
             document.getElementById('chBaseURL').value = '';
+            document.getElementById('chKeyMode').value = 'round-robin';
             document.getElementById('chEditId').value = '';
             document.querySelector('#addChannelModal .modal-title').textContent = '添加渠道';
             document.getElementById('addChannelModal').classList.add('open');
@@ -161,6 +174,7 @@
             document.getElementById('chName').value = c.name || '';
             document.getElementById('chPrefix').value = c.prefix || '';
             document.getElementById('chBaseURL').value = c.base_url || '';
+            document.getElementById('chKeyMode').value = c.key_mode || 'round-robin';
             document.getElementById('chEditId').value = c.id;
             document.querySelector('#addChannelModal .modal-title').textContent = '编辑渠道';
             document.getElementById('addChannelModal').classList.add('open');
@@ -174,12 +188,13 @@
             const name = document.getElementById('chName').value.trim();
             const prefix = document.getElementById('chPrefix').value.trim();
             const base_url = document.getElementById('chBaseURL').value.trim();
+            const key_mode = document.getElementById('chKeyMode').value;
             const editId = document.getElementById('chEditId').value;
             if (!prefix) { document.getElementById('chPrefix').focus(); showToast('前缀不能为空', true); return; }
             if (!base_url) { document.getElementById('chBaseURL').focus(); return; }
             try {
                 const action = editId ? 'update' : 'add';
-                const body = {action, name, prefix, base_url};
+                const body = {action, name, prefix, base_url, key_mode};
                 if (editId) body.id = parseInt(editId);
                 await fetch(API_BASE + '/channels', {
                     method: 'POST', headers: {'Content-Type':'application/json'},
