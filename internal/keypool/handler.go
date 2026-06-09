@@ -27,8 +27,8 @@ func testPayload(model string) []byte {
 			{"role": "user", "content": "Hi"},
 		},
 		"max_completion_tokens": 16,
-		"stream":               false,
-		"thinking":             map[string]string{"type": "disabled"},
+		"stream":                false,
+		"thinking":              map[string]string{"type": "disabled"},
 	}
 	b, _ := json.Marshal(msg)
 	return b
@@ -78,6 +78,7 @@ func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	mux.HandleFunc("/settings", h.Settings)
 	mux.HandleFunc("/health-check", h.HealthCheck)
 	mux.HandleFunc("/proxy-keys", h.ProxyKeys)
+	mux.HandleFunc("/backup", h.Backup)
 	mux.HandleFunc("/logs", h.Logs)
 
 	// Periodic log cleanup (every 5 minutes)
@@ -180,7 +181,7 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	models := h.getOrFetchModels(channel, key)
 	body = h.swapModelIfNeeded(body, models, defaultModel)
 
-	req, err := http.NewRequest(http.MethodPost, channel.BaseURL, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, chatCompletionsURLFromBase(channel.BaseURL), bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
@@ -303,12 +304,14 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
-	totalTokens, totalCalls, enabled, disabled, _ := h.pool.GetStats()
+	totalTokens, totalCalls, todayTokens, todayCalls, enabled, disabled, _ := h.pool.GetStats()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"total_calls":   totalCalls,
 		"total_tokens":  totalTokens,
+		"today_calls":   todayCalls,
+		"today_tokens":  todayTokens,
 		"enabled_keys":  enabled,
 		"disabled_keys": disabled,
 	})
@@ -336,7 +339,10 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 			IsPinned    bool   `json:"is_pinned"`
 		}
 		// Find the "next to use" key per channel (lowest usage_count when no pin).
-		type chActive struct{ minUsage, minID int; key string }
+		type chActive struct {
+			minUsage, minID int
+			key             string
+		}
 		chBest := make(map[int]*chActive)
 		for _, k := range keys {
 			if !k.Enabled {
@@ -453,7 +459,7 @@ func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	proxyReq, err := http.NewRequest(http.MethodPost, channel.BaseURL, bytes.NewReader(testPayload(req.Model)))
+	proxyReq, err := http.NewRequest(http.MethodPost, chatCompletionsURLFromBase(channel.BaseURL), bytes.NewReader(testPayload(req.Model)))
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
@@ -526,13 +532,33 @@ func (h *Handler) resolveChannel(r *http.Request) (*ChannelInfo, error) {
 	return h.pool.GetDefaultChannel()
 }
 
-// modelsURLFromBase derives /v1/models from a chat completions base URL.
+// modelsURLFromBase derives the models endpoint from the configured upstream URL.
 func modelsURLFromBase(baseURL string) string {
-	u, err := url.Parse(strings.TrimRight(baseURL, "/"))
+	return upstreamEndpointURLFromBase(baseURL, "models")
+}
+
+// chatCompletionsURLFromBase derives the chat completions endpoint from the configured upstream URL.
+func chatCompletionsURLFromBase(baseURL string) string {
+	return upstreamEndpointURLFromBase(baseURL, "chat/completions")
+}
+
+func upstreamEndpointURLFromBase(baseURL string, endpoint string) string {
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
 	if err != nil {
 		return ""
 	}
-	return u.Scheme + "://" + u.Host + "/v1/models"
+	u.RawQuery = ""
+	u.Fragment = ""
+
+	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i, segment := range segments {
+		if segment == "v1" {
+			u.Path = "/" + strings.Join(segments[:i+1], "/")
+			return strings.TrimRight(u.String(), "/") + "/" + strings.TrimLeft(endpoint, "/")
+		}
+	}
+
+	return strings.TrimRight(u.String(), "/")
 }
 
 // refreshModels fetches /v1/models from upstream and caches the result (1h TTL).
@@ -665,32 +691,36 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	channelID := 0
 	fmt.Sscanf(r.URL.Query().Get("channel"), "%d", &channelID)
 	key := r.URL.Query().Get("key")
+	baseURL := strings.TrimSpace(r.URL.Query().Get("base_url"))
 
 	if key == "" {
 		http.Error(w, `{"error":"Missing key parameter"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Resolve channel
 	var channel *ChannelInfo
-	if channelID > 0 {
-		channels, _ := h.pool.GetAllChannels()
-		for _, c := range channels {
-			if c.ID == channelID {
-				channel = &c
-				break
+	if baseURL == "" {
+		// Resolve channel
+		if channelID > 0 {
+			channels, _ := h.pool.GetAllChannels()
+			for _, c := range channels {
+				if c.ID == channelID {
+					channel = &c
+					break
+				}
 			}
 		}
-	}
-	if channel == nil {
-		channel, _ = h.pool.GetDefaultChannel()
-	}
-	if channel == nil {
-		http.Error(w, `{"error":"No channel found"}`, http.StatusNotFound)
-		return
+		if channel == nil {
+			channel, _ = h.pool.GetDefaultChannel()
+		}
+		if channel == nil {
+			http.Error(w, `{"error":"No channel found"}`, http.StatusNotFound)
+			return
+		}
+		baseURL = channel.BaseURL
 	}
 
-	modelsURL := modelsURLFromBase(channel.BaseURL)
+	modelsURL := modelsURLFromBase(baseURL)
 	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
@@ -709,8 +739,8 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 
 	body, _ := io.ReadAll(resp.Body)
 
-	// Cache models for this channel (populated when user clicks refresh in UI).
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+	// Cache models for persisted channels (populated when user clicks refresh in UI).
+	if channel != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		var parsed struct {
 			Data []struct {
 				ID string `json:"id"`
@@ -927,11 +957,15 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 
 		switch req.Action {
 		case "add":
-			if err := h.pool.AddChannel(req.Name, req.Prefix, req.BaseURL); err != nil {
+			id, err := h.pool.AddChannel(req.Name, req.Prefix, req.BaseURL)
+			if err != nil {
 				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+			if req.KeyMode != "" && req.KeyMode != "round-robin" {
+				h.pool.SetKeyMode(id, req.KeyMode)
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "id": id})
 		case "update":
 			if err := h.pool.UpdateChannel(req.ID, req.Name, req.Prefix, req.BaseURL); err != nil {
 				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
@@ -972,6 +1006,47 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{})
+}
+
+func (h *Handler) Backup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		backup, err := h.pool.ExportBackup()
+		if err != nil {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+		body, err := json.MarshalIndent(backup, "", "  ")
+		if err != nil {
+			http.Error(w, `{"error":"Failed to encode backup"}`, http.StatusInternalServerError)
+			return
+		}
+		filename := "mimo-proxy-backup-" + time.Now().Format("20060102-150405") + ".json"
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		w.Write(body)
+
+	case http.MethodPost:
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+		var backup BackupData
+		if err := json.NewDecoder(r.Body).Decode(&backup); err != nil {
+			http.Error(w, `{"error":"Invalid backup file"}`, http.StatusBadRequest)
+			return
+		}
+		summary, err := h.pool.ImportBackup(&backup)
+		if err != nil {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+			return
+		}
+		h.modelMu.Lock()
+		h.modelCache = make(map[int]*modelCache)
+		h.modelMu.Unlock()
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "summary": summary})
+
+	default:
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+	}
 }
 
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {

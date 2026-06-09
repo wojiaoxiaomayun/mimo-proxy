@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -39,6 +40,36 @@ type ChannelInfo struct {
 type KeyPool struct {
 	db *sql.DB
 	mu sync.RWMutex
+}
+
+type BackupData struct {
+	Version    int               `json:"version"`
+	ExportedAt string            `json:"exported_at"`
+	Channels   []ChannelInfo     `json:"channels"`
+	Keys       []KeyInfo         `json:"keys"`
+	ProxyKeys  []ProxyKeyInfo    `json:"proxy_keys"`
+	Settings   map[string]string `json:"settings"`
+}
+
+type ImportSummary struct {
+	Channels  int `json:"channels"`
+	Keys      int `json:"keys"`
+	ProxyKeys int `json:"proxy_keys"`
+	Settings  int `json:"settings"`
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func defaultCreatedAt(createdAt string) string {
+	if strings.TrimSpace(createdAt) != "" {
+		return createdAt
+	}
+	return time.Now().Format("2006-01-02 15:04:05")
 }
 
 func New(dbPath, defaultURL string) (*KeyPool, error) {
@@ -159,6 +190,31 @@ func New(dbPath, defaultURL string) (*KeyPool, error) {
 		return nil, err
 	}
 
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS daily_usage (
+			date TEXT PRIMARY KEY,
+			calls INTEGER DEFAULT 0,
+			prompt_tokens INTEGER DEFAULT 0,
+			completion_tokens INTEGER DEFAULT 0,
+			total_tokens INTEGER DEFAULT 0
+		)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	var dailyRows int
+	db.QueryRow(`SELECT COUNT(*) FROM daily_usage`).Scan(&dailyRows)
+	if dailyRows == 0 {
+		db.Exec(`
+			INSERT INTO daily_usage (date, calls, prompt_tokens, completion_tokens, total_tokens)
+			SELECT date(created_at, 'localtime'), COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(total_tokens), 0)
+			FROM request_logs
+			WHERE path LIKE '%chat/completions%'
+			GROUP BY date(created_at, 'localtime')
+		`)
+	}
+
 	return &KeyPool{db: db}, nil
 }
 
@@ -260,6 +316,18 @@ func (p *KeyPool) IncrementUsage(key string, promptTokens, completionTokens, tot
 			total_tokens = total_tokens + ?
 		WHERE key = ?
 	`, promptTokens, completionTokens, totalTokens, key)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.Exec(`
+		INSERT INTO daily_usage (date, calls, prompt_tokens, completion_tokens, total_tokens)
+		VALUES (?, 1, ?, ?, ?)
+		ON CONFLICT(date) DO UPDATE SET
+			calls = calls + 1,
+			prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+			completion_tokens = completion_tokens + excluded.completion_tokens,
+			total_tokens = total_tokens + excluded.total_tokens
+	`, time.Now().Format("2006-01-02"), promptTokens, completionTokens, totalTokens)
 	return err
 }
 
@@ -315,7 +383,10 @@ func (p *KeyPool) UpdateKey(key, note, defaultModel string) error {
 func (p *KeyPool) GetAll(channelID int) ([]KeyInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	return p.queryKeys(channelID)
+}
 
+func (p *KeyPool) queryKeys(channelID int) ([]KeyInfo, error) {
 	var rows *sql.Rows
 	var err error
 	if channelID > 0 {
@@ -339,7 +410,7 @@ func (p *KeyPool) GetAll(channelID int) ([]KeyInfo, error) {
 	return keys, nil
 }
 
-func (p *KeyPool) GetStats() (totalTokens int64, totalCalls int64, enabledCount, disabledCount int, err error) {
+func (p *KeyPool) GetStats() (totalTokens int64, totalCalls int64, todayTokens int64, todayCalls int64, enabledCount, disabledCount int, err error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -349,6 +420,11 @@ func (p *KeyPool) GetStats() (totalTokens int64, totalCalls int64, enabledCount,
 	}
 
 	err = p.db.QueryRow(`SELECT COALESCE(SUM(usage_count), 0) FROM api_keys`).Scan(&totalCalls)
+	if err != nil {
+		return
+	}
+
+	err = p.db.QueryRow(`SELECT COALESCE(SUM(calls), 0), COALESCE(SUM(total_tokens), 0) FROM daily_usage WHERE date = ?`, time.Now().Format("2006-01-02")).Scan(&todayCalls, &todayTokens)
 	if err != nil {
 		return
 	}
@@ -384,11 +460,191 @@ func (p *KeyPool) Close() error {
 	return p.db.Close()
 }
 
+// ExportBackup returns configuration data only; request logs are intentionally excluded.
+func (p *KeyPool) ExportBackup() (*BackupData, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	backup := &BackupData{
+		Version:    1,
+		ExportedAt: time.Now().Format(time.RFC3339),
+		Settings:   make(map[string]string),
+	}
+
+	channels, err := p.queryChannels()
+	if err != nil {
+		return nil, err
+	}
+	backup.Channels = channels
+
+	keys, err := p.queryKeys(0)
+	if err != nil {
+		return nil, err
+	}
+	backup.Keys = keys
+
+	proxyKeys, err := p.queryProxyKeys()
+	if err != nil {
+		return nil, err
+	}
+	backup.ProxyKeys = proxyKeys
+
+	rows, err := p.db.Query(`SELECT key, value FROM settings ORDER BY key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		backup.Settings[key] = value
+	}
+
+	return backup, rows.Err()
+}
+
+func (p *KeyPool) ImportBackup(backup *BackupData) (*ImportSummary, error) {
+	if backup == nil {
+		return nil, fmt.Errorf("backup is empty")
+	}
+	if len(backup.Channels) == 0 && len(backup.Keys) == 0 && len(backup.ProxyKeys) == 0 && len(backup.Settings) == 0 {
+		return nil, fmt.Errorf("backup contains no importable data")
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	tx, err := p.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	summary := &ImportSummary{}
+	channelIDMap := make(map[int]int)
+	defaultImported := false
+	for _, channel := range backup.Channels {
+		prefix := strings.TrimSpace(channel.Prefix)
+		if prefix == "" {
+			return nil, fmt.Errorf("channel prefix is required")
+		}
+		keyMode := channel.KeyMode
+		if keyMode == "" {
+			keyMode = "round-robin"
+		}
+		if keyMode != "round-robin" && keyMode != "failover" {
+			keyMode = "round-robin"
+		}
+		isDefault := channel.IsDefault && !defaultImported
+		if channel.IsDefault && !defaultImported {
+			if _, err := tx.Exec(`UPDATE channels SET is_default = 0`); err != nil {
+				return nil, err
+			}
+			defaultImported = true
+		}
+
+		_, err := tx.Exec(`
+			INSERT INTO channels (name, prefix, base_url, enabled, is_default, pinned_key, key_mode, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(prefix) DO UPDATE SET
+				name = excluded.name,
+				base_url = excluded.base_url,
+				enabled = excluded.enabled,
+				is_default = excluded.is_default,
+				pinned_key = excluded.pinned_key,
+				key_mode = excluded.key_mode
+		`, channel.Name, prefix, channel.BaseURL, boolToInt(channel.Enabled), boolToInt(isDefault), channel.PinnedKey, keyMode, defaultCreatedAt(channel.CreatedAt))
+		if err != nil {
+			return nil, err
+		}
+
+		var newID int
+		if err := tx.QueryRow(`SELECT id FROM channels WHERE prefix = ?`, prefix).Scan(&newID); err != nil {
+			return nil, err
+		}
+		channelIDMap[channel.ID] = newID
+		summary.Channels++
+	}
+
+	defaultChannelID := 0
+	tx.QueryRow(`SELECT id FROM channels WHERE is_default = 1 ORDER BY id LIMIT 1`).Scan(&defaultChannelID)
+	if defaultChannelID == 0 {
+		tx.QueryRow(`SELECT id FROM channels ORDER BY id LIMIT 1`).Scan(&defaultChannelID)
+	}
+
+	for _, key := range backup.Keys {
+		apiKey := strings.TrimSpace(key.Key)
+		if apiKey == "" {
+			continue
+		}
+		channelID := channelIDMap[key.ChannelID]
+		if channelID == 0 {
+			channelID = defaultChannelID
+		}
+		_, err := tx.Exec(`
+			INSERT INTO api_keys (key, note, channel_id, default_model, usage_count, prompt_tokens, completion_tokens, total_tokens, enabled, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(key) DO UPDATE SET
+				note = excluded.note,
+				channel_id = excluded.channel_id,
+				default_model = excluded.default_model,
+				usage_count = excluded.usage_count,
+				prompt_tokens = excluded.prompt_tokens,
+				completion_tokens = excluded.completion_tokens,
+				total_tokens = excluded.total_tokens,
+				enabled = excluded.enabled
+		`, apiKey, key.Note, channelID, key.DefaultModel, key.UsageCount, key.PromptTokens, key.CompletionTokens, key.TotalTokens, boolToInt(key.Enabled), defaultCreatedAt(key.CreatedAt))
+		if err != nil {
+			return nil, err
+		}
+		summary.Keys++
+	}
+
+	for _, proxyKey := range backup.ProxyKeys {
+		key := strings.TrimSpace(proxyKey.Key)
+		if key == "" {
+			continue
+		}
+		_, err := tx.Exec(`
+			INSERT INTO proxy_keys (key, note, enabled, created_at)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(key) DO UPDATE SET
+				note = excluded.note,
+				enabled = excluded.enabled
+		`, key, proxyKey.Note, boolToInt(proxyKey.Enabled), defaultCreatedAt(proxyKey.CreatedAt))
+		if err != nil {
+			return nil, err
+		}
+		summary.ProxyKeys++
+	}
+
+	for key, value := range backup.Settings {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value); err != nil {
+			return nil, err
+		}
+		summary.Settings++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return summary, nil
+}
+
 // ============ Channels ============
 
 func (p *KeyPool) GetAllChannels() ([]ChannelInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	return p.queryChannels()
+}
+
+func (p *KeyPool) queryChannels() ([]ChannelInfo, error) {
 	rows, err := p.db.Query(`SELECT id, name, prefix, base_url, enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), created_at FROM channels ORDER BY is_default DESC, id`)
 	if err != nil {
 		return nil, err
@@ -431,14 +687,21 @@ func (p *KeyPool) GetDefaultChannel() (*ChannelInfo, error) {
 	return &c, nil
 }
 
-func (p *KeyPool) AddChannel(name, prefix, baseURL string) error {
+func (p *KeyPool) AddChannel(name, prefix, baseURL string) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if prefix == "" {
-		return fmt.Errorf("prefix is required")
+		return 0, fmt.Errorf("prefix is required")
 	}
-	_, err := p.db.Exec(`INSERT INTO channels (name, prefix, base_url) VALUES (?, ?, ?)`, name, prefix, baseURL)
-	return err
+	res, err := p.db.Exec(`INSERT INTO channels (name, prefix, base_url) VALUES (?, ?, ?)`, name, prefix, baseURL)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return int(id), nil
 }
 
 func (p *KeyPool) SetDefaultChannel(id int) error {
@@ -515,6 +778,10 @@ func (p *KeyPool) ValidateProxyKey(key string) bool {
 func (p *KeyPool) GetAllProxyKeys() ([]ProxyKeyInfo, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	return p.queryProxyKeys()
+}
+
+func (p *KeyPool) queryProxyKeys() ([]ProxyKeyInfo, error) {
 	rows, err := p.db.Query(`SELECT id, key, note, enabled, created_at FROM proxy_keys ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -653,4 +920,3 @@ func (p *KeyPool) SetSetting(key, value string) error {
 	_, err := p.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
 	return err
 }
-

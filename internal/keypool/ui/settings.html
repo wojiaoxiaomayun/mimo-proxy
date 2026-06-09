@@ -66,6 +66,33 @@
 
             <div class="card" style="margin-top:1.25rem;">
                 <div class="card-header">
+                    <div class="card-title">配置备份</div>
+                    <div class="card-description">导出或导入渠道、API Key、代理 Key 与设置；请求日志不会写入备份</div>
+                </div>
+                <div class="card-content">
+                    <div class="settings-group">
+                        <div class="field-group">
+                            <label>备份文件</label>
+                            <div class="field-hint">导入会按渠道前缀和 Key 值合并已有数据，并覆盖备注、状态、默认模型与用量统计</div>
+                        </div>
+                        <div class="field-actions" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                            <button class="btn btn-outline" id="exportBackupBtn" onclick="exportBackup()">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></g></svg>
+                                导出
+                            </button>
+                            <button class="btn btn-primary" id="importBackupBtn" onclick="openImportBackup()">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 21V9m0 0 4 4m-4-4-4 4"/><path d="M5 3h14"/></g></svg>
+                                导入
+                            </button>
+                            <input type="file" id="backupFileInput" accept="application/json,.json" style="display:none;" onchange="importBackupFile(event)">
+                        </div>
+                    </div>
+                    <div id="backupResult" style="margin-top:1rem;"></div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:1.25rem;">
+                <div class="card-header">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <div class="card-title">代理 Key（sk-xxx）</div>
                         <button class="btn btn-primary btn-sm" onclick="openGenProxyKeyModal()">
@@ -176,6 +203,74 @@
         }
 
         /* ========== Proxy Keys ========== */
+
+        async function exportBackup() {
+            const btn = document.getElementById('exportBackupBtn');
+            btn.disabled = true;
+            btn.innerHTML = `${ICO.wrench}导出中`;
+            try {
+                const res = await fetch(API_BASE + '/backup');
+                if (!res.ok) throw new Error(await res.text());
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="?([^";]+)"?/i);
+                const filename = match ? match[1] : 'mimo-proxy-backup.json';
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                document.getElementById('backupResult').innerHTML = `<div class="result-success-banner">${ICO.check}<span>备份已导出</span></div>`;
+            } catch (e) {
+                document.getElementById('backupResult').innerHTML = `<div class="result-error-banner">${ICO.cross}<span>导出失败：${e.message}</span></div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></g></svg>导出`;
+            }
+        }
+
+        function openImportBackup() {
+            const input = document.getElementById('backupFileInput');
+            input.value = '';
+            input.click();
+        }
+
+        async function importBackupFile(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            const btn = document.getElementById('importBackupBtn');
+            const result = document.getElementById('backupResult');
+            try {
+                const text = await file.text();
+                const backup = JSON.parse(text);
+                const channels = backup.channels?.length || 0;
+                const keys = backup.keys?.length || 0;
+                const proxyKeys = backup.proxy_keys?.length || 0;
+                if (!confirm(`确定导入 ${file.name}？\n渠道 ${channels} 个，API Key ${keys} 个，代理 Key ${proxyKeys} 个。`)) return;
+
+                btn.disabled = true;
+                btn.innerHTML = `${ICO.wrench}导入中`;
+                result.innerHTML = '<div class="loading"><div class="spinner"></div>正在导入备份…</div>';
+                const res = await fetch(API_BASE + '/backup', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify(backup)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || '导入失败');
+                const s = data.summary || {};
+                result.innerHTML = `<div class="result-success-banner">${ICO.check}<span>导入完成：渠道 ${s.channels || 0}，API Key ${s.keys || 0}，代理 Key ${s.proxy_keys || 0}，设置 ${s.settings || 0}</span></div>`;
+                await loadProxyKeys();
+            } catch (e) {
+                result.innerHTML = `<div class="result-error-banner">${ICO.cross}<span>导入失败：${e.message}</span></div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 21V9m0 0 4 4m-4-4-4 4"/><path d="M5 3h14"/></g></svg>导入`;
+            }
+        }
 
         async function loadProxyKeys() {
             try {

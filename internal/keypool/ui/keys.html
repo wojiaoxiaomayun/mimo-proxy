@@ -43,6 +43,14 @@
         <div class="main-body">
             <div class="stats-grid">
                 <div class="stat-card">
+                    <div class="stat-label">今日调用</div>
+                    <div class="stat-value" id="todayCalls">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">今日 Tokens</div>
+                    <div class="stat-value" id="todayTokens">-</div>
+                </div>
+                <div class="stat-card">
                     <div class="stat-label">总调用</div>
                     <div class="stat-value" id="totalCalls">-</div>
                 </div>
@@ -64,6 +72,10 @@
                             <select id="channelFilter" style="width:10rem;height:2rem;font-size:0.8125rem;" onchange="fetchKeys()">
                                 <option value="0">全部渠道</option>
                             </select>
+                            <button class="btn btn-outline btn-sm" id="speedTestAllBtn" onclick="runSpeedTestAll()">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 13a8 8 0 0 1 16 0m-8 5 4-8"/><circle cx="12" cy="18" r="2"/></svg>
+                                一键测速
+                            </button>
                             <button class="btn btn-primary btn-sm" onclick="openAddKeyModal()">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
                                 添加 Key
@@ -180,6 +192,9 @@
     <script>
         /* ========== Channels Cache (for key page needs) ========== */
         let allChannels = [];
+        let currentKeys = [];
+        let speedTestRunning = false;
+        const speedTestResults = {};
 
         async function loadChannels() {
             try {
@@ -202,6 +217,8 @@
             try {
                 const res = await fetch(API_BASE + '/stats');
                 const data = await res.json();
+                document.getElementById('todayCalls').textContent = (data.today_calls || 0).toLocaleString();
+                document.getElementById('todayTokens').textContent = formatTokens(data.today_tokens);
                 document.getElementById('totalCalls').textContent = (data.total_calls || 0).toLocaleString();
                 document.getElementById('totalTokens').textContent = formatTokens(data.total_tokens);
                 document.getElementById('keyCount').textContent = (data.enabled_keys || 0) + (data.disabled_keys || 0);
@@ -226,6 +243,7 @@
                 const noteDisplay = k.note
                     ? `<span class="td-note" title="${k.note}">${k.note}</span>`
                     : `<span class="td-note-empty" onclick='openEditKeyModal(${JSON.stringify(k).replace(/'/g,"&#39;")})'>点击添加备注</span>`;
+                const speedCell = renderSpeedCell(k);
                 rows += `<tr>
                     <td class="td-key" title="${k.key}">${maskKey(k.key)}</td>
                     <td>${noteDisplay}</td>
@@ -234,6 +252,7 @@
                     <td>${badge}</td>
                     <td class="td-usage">${k.usage_count}</td>
                     <td class="td-usage" style="font-weight:600;">${formatTokens(k.total_tokens)}</td>
+                    <td class="td-speed">${speedCell}</td>
                     <td class="td-date">${formatDate(k.created_at)}</td>
                     <td class="td-actions"><div class="btn-group">
                         <button class="btn btn-sm btn-ghost" data-tip="测试" onclick="openTestModal('${k.key}', ${k.channel_id})">${ICO.play}</button>
@@ -247,8 +266,21 @@
                 </tr>`;
             }
             return `<div class="table-wrapper"><table><thead><tr>
-                <th>Key</th><th>备注</th><th>渠道</th><th>使用</th><th>状态</th><th>调用</th><th>Total</th><th>创建时间</th><th style="text-align:right">操作</th>
+                <th>Key</th><th>备注</th><th>渠道</th><th>使用</th><th>状态</th><th>调用</th><th>Total</th><th>测速</th><th>创建时间</th><th style="text-align:right">操作</th>
             </tr></thead><tbody>${rows}</tbody></table></div>`;
+        }
+
+        function renderSpeedCell(k) {
+            const state = speedTestResults[k.key];
+            if (!state) return '<span class="speed-muted">未测速</span>';
+            if (state.status === 'testing') return '<span class="speed-testing"><span class="speed-dot"></span>测速中</span>';
+            if (state.status === 'ok') return `<span class="speed-ok">${state.latency} ms</span>`;
+            if (state.status === 'skip') return '<span class="speed-muted">未测速</span>';
+            return `<span class="speed-error" title="${state.message || '测速失败'}">失败</span>`;
+        }
+
+        function renderCurrentKeys() {
+            document.getElementById('keysGrid').innerHTML = renderKeysTable(currentKeys);
         }
 
         async function fetchKeys() {
@@ -256,8 +288,58 @@
                 const channelID = document.getElementById('channelFilter')?.value || '0';
                 const res = await fetch(API_BASE + '/keys?channel=' + channelID);
                 const data = await res.json();
-                document.getElementById('keysGrid').innerHTML = renderKeysTable(data.keys || []);
+                currentKeys = data.keys || [];
+                renderCurrentKeys();
             } catch (e) { console.error('fetchKeys:', e); }
+        }
+
+        async function runSpeedTestAll() {
+            if (speedTestRunning) return;
+            const targets = currentKeys.filter(k => k.default_model);
+            if (targets.length === 0) {
+                showToast('没有配置默认模型的 Key', true);
+                return;
+            }
+
+            speedTestRunning = true;
+            const btn = document.getElementById('speedTestAllBtn');
+            btn.disabled = true;
+            btn.innerHTML = `${ICO.wrench}测速中 0/${targets.length}`;
+            for (const k of currentKeys) {
+                if (k.default_model) speedTestResults[k.key] = {status: 'testing'};
+            }
+            renderCurrentKeys();
+
+            let done = 0;
+            for (const k of targets) {
+                try {
+                    const res = await fetch(API_BASE + '/test-key', {
+                        method: 'POST',
+                        headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({key: k.key, model: k.default_model, channel_id: k.channel_id || 0})
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (res.ok && data.status === 'ok') {
+                        speedTestResults[k.key] = {status: 'ok', latency: data.latency};
+                    } else {
+                        let message = `HTTP ${data.code || res.status}`;
+                        if (data.error_body?.error) {
+                            message = typeof data.error_body.error === 'string' ? data.error_body.error : data.error_body.error.message || message;
+                        }
+                        speedTestResults[k.key] = {status: 'error', message};
+                    }
+                } catch (e) {
+                    speedTestResults[k.key] = {status: 'error', message: e.message || '网络错误'};
+                }
+                done++;
+                btn.innerHTML = `${ICO.wrench}测速中 ${done}/${targets.length}`;
+                renderCurrentKeys();
+            }
+
+            speedTestRunning = false;
+            btn.disabled = false;
+            btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 13a8 8 0 0 1 16 0m-8 5 4-8"/><circle cx="12" cy="18" r="2"/></svg>一键测速`;
+            showToast(`测速完成：${targets.length} 个 Key`);
         }
 
         /* ========== Edit Key Modal ========== */

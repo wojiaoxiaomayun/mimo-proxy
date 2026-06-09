@@ -85,6 +85,24 @@
                     </select>
                     <div class="field-hint">轮询模式按使用次数均匀分配；故障转移模式固定使用一个 Key，失败后自动切换</div>
                 </div>
+                <div class="separator"></div>
+                <div class="field-group">
+                    <label>API Key</label>
+                    <input type="text" id="chApiKey" placeholder="可选：创建渠道后同时添加 Key" style="width:100%;">
+                    <div class="field-hint">留空则只保存渠道；填写后会调用 Key 保存接口绑定到当前渠道</div>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>默认模型</label>
+                    <div style="display:flex;gap:0.5rem;">
+                        <select id="chDefaultModel" style="flex:1;">
+                            <option value="">不指定（透传原始模型）</option>
+                        </select>
+                        <button class="btn btn-outline" id="chRefreshModelsBtn" onclick="fetchModelsForChannelKey()" data-tip="刷新模型列表">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9a9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5m5 4a9 9 0 0 1-9 9a9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></g></svg>
+                        </button>
+                    </div>
+                    <div class="field-hint">若请求模型不在该 Key 的模型列表中，会自动替换为默认模型</div>
+                </div>
                 <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
                     <button class="btn btn-outline" onclick="closeAddChannelModal()" style="flex:1;">取消</button>
                     <button class="btn btn-primary" onclick="submitAddChannel()" style="flex:1;">添加</button>
@@ -121,7 +139,9 @@
                 const toggle = c.enabled
                     ? `<button class="btn btn-sm btn-ghost" data-tip="禁用" onclick="toggleChannel(${c.id}, false)">${ICO.toggleOn}</button>`
                     : `<button class="btn btn-sm btn-ghost" data-tip="启用" onclick="toggleChannel(${c.id}, true)">${ICO.toggleOff}</button>`;
-                const defaultBtn = c.is_default ? '' : `<button class="btn btn-sm btn-ghost" data-tip="设为默认" onclick="setDefaultChannel(${c.id})">${ICO.star}</button>`;
+                const defaultBtn = c.is_default
+                    ? `<button class="btn btn-sm btn-ghost" data-tip="默认渠道" disabled style="color:hsl(38 92% 45%);opacity:1;">${ICO.star}</button>`
+                    : `<button class="btn btn-sm btn-ghost" data-tip="设为默认" onclick="setDefaultChannel(${c.id})">${ICO.star}</button>`;
                 const modeLabel = c.key_mode === 'failover'
                     ? '<span class="badge badge-warning"><span class="badge-dot"></span>故障转移</span>'
                     : '<span class="badge" style="background:hsl(var(--muted));color:hsl(var(--muted-foreground));">轮询</span>';
@@ -165,6 +185,8 @@
             document.getElementById('chPrefix').value = '';
             document.getElementById('chBaseURL').value = '';
             document.getElementById('chKeyMode').value = 'round-robin';
+            document.getElementById('chApiKey').value = '';
+            document.getElementById('chDefaultModel').innerHTML = '<option value="">不指定（透传原始模型）</option>';
             document.getElementById('chEditId').value = '';
             document.querySelector('#addChannelModal .modal-title').textContent = '添加渠道';
             document.getElementById('addChannelModal').classList.add('open');
@@ -175,6 +197,8 @@
             document.getElementById('chPrefix').value = c.prefix || '';
             document.getElementById('chBaseURL').value = c.base_url || '';
             document.getElementById('chKeyMode').value = c.key_mode || 'round-robin';
+            document.getElementById('chApiKey').value = '';
+            document.getElementById('chDefaultModel').innerHTML = '<option value="">不指定（透传原始模型）</option>';
             document.getElementById('chEditId').value = c.id;
             document.querySelector('#addChannelModal .modal-title').textContent = '编辑渠道';
             document.getElementById('addChannelModal').classList.add('open');
@@ -189,6 +213,8 @@
             const prefix = document.getElementById('chPrefix').value.trim();
             const base_url = document.getElementById('chBaseURL').value.trim();
             const key_mode = document.getElementById('chKeyMode').value;
+            const key = document.getElementById('chApiKey').value.trim();
+            const default_model = document.getElementById('chDefaultModel').value || '';
             const editId = document.getElementById('chEditId').value;
             if (!prefix) { document.getElementById('chPrefix').focus(); showToast('前缀不能为空', true); return; }
             if (!base_url) { document.getElementById('chBaseURL').focus(); return; }
@@ -196,14 +222,54 @@
                 const action = editId ? 'update' : 'add';
                 const body = {action, name, prefix, base_url, key_mode};
                 if (editId) body.id = parseInt(editId);
-                await fetch(API_BASE + '/channels', {
+                const res = await fetch(API_BASE + '/channels', {
                     method: 'POST', headers: {'Content-Type':'application/json'},
                     body: JSON.stringify(body)
                 });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || '渠道保存失败');
+                const channelID = editId ? parseInt(editId) : data.id;
+                if (key && channelID) {
+                    const keyRes = await fetch(API_BASE + '/keys', {
+                        method: 'POST', headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({action:'add', key, note:'', channel_id: channelID, default_model})
+                    });
+                    const keyData = await keyRes.json().catch(() => ({}));
+                    if (!keyRes.ok) throw new Error(keyData.error || 'Key 保存失败');
+                }
                 closeAddChannelModal();
                 await loadChannels();
-                showToast(editId ? '渠道已更新' : '渠道已添加');
-            } catch (e) { alert('操作失败: ' + e); }
+                showToast(key ? (editId ? '渠道和 Key 已保存' : '渠道和 Key 已添加') : (editId ? '渠道已更新' : '渠道已添加'));
+            } catch (e) { alert('操作失败: ' + (e.message || e)); }
+        }
+
+        async function fetchModelsForChannelKey() {
+            const key = document.getElementById('chApiKey').value.trim();
+            const baseURL = document.getElementById('chBaseURL').value.trim();
+            const editId = document.getElementById('chEditId').value;
+            const sel = document.getElementById('chDefaultModel');
+            const btn = document.getElementById('chRefreshModelsBtn');
+            if (!key) { document.getElementById('chApiKey').focus(); showToast('请先输入 Key', true); return; }
+            if (!baseURL) { document.getElementById('chBaseURL').focus(); showToast('请先输入 Base URL', true); return; }
+            sel.innerHTML = '<option value="">加载中…</option>';
+            btn.disabled = true;
+            try {
+                const params = new URLSearchParams({key});
+                if (editId) params.set('channel', editId);
+                else params.set('base_url', baseURL);
+                const res = await fetch(API_BASE + '/models?' + params.toString());
+                const data = await res.json();
+                let opts = '<option value="">不指定（透传原始模型）</option>';
+                if (data.data && data.data.length > 0) {
+                    for (const m of data.data) opts += `<option value="${m.id}">${m.id}</option>`;
+                }
+                sel.innerHTML = opts;
+            } catch (e) {
+                sel.innerHTML = '<option value="">不指定（透传原始模型）</option>';
+                showToast('模型列表获取失败', true);
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         async function toggleChannel(id, enable) {
