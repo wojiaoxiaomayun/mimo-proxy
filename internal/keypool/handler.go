@@ -196,8 +196,9 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 			req.Header.Set("Authorization", "Bearer "+key)
 		}
 	}
+	h.prepareUpstreamRequest(req)
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := h.upstreamClient(120 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		h.recordKeyFailure(key)
@@ -467,8 +468,9 @@ func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 	proxyReq.Header.Set("Content-Type", "application/json")
 	proxyReq.Header.Set("api-key", req.Key)
 	proxyReq.Header.Set("Authorization", "Bearer "+req.Key)
+	h.prepareUpstreamRequest(proxyReq)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := h.upstreamClient(30 * time.Second)
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		http.Error(w, "Request failed: "+err.Error(), http.StatusBadGateway)
@@ -569,8 +571,9 @@ func (h *Handler) refreshModels(channelID int, modelsURL string, key string) []s
 	}
 	req.Header.Set("api-key", key)
 	req.Header.Set("Authorization", "Bearer "+key)
+	h.prepareUpstreamRequest(req)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := h.upstreamClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil
@@ -728,8 +731,9 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("api-key", key)
 	req.Header.Set("Authorization", "Bearer "+key)
+	h.prepareUpstreamRequest(req)
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := h.upstreamClient(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "Failed to fetch models: "+err.Error(), http.StatusBadGateway)
@@ -801,8 +805,9 @@ func (h *Handler) V1Models(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("api-key", key)
 	req.Header.Set("Authorization", "Bearer "+key)
+	h.prepareUpstreamRequest(req)
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := h.upstreamClient(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, `{"error":{"message":"Upstream request failed: `+err.Error()+`","code":"502"}}`, http.StatusBadGateway)
@@ -1115,8 +1120,9 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 			}
 			testReq.Header.Set("api-key", k.Key)
 			testReq.Header.Set("Authorization", "Bearer "+k.Key)
+			h.prepareUpstreamRequest(testReq)
 
-			client := &http.Client{Timeout: 15 * time.Second}
+			client := h.upstreamClient(15 * time.Second)
 			resp, err := client.Do(testReq)
 			if err != nil {
 				fails++
