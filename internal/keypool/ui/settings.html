@@ -15,13 +15,13 @@
             </div>
         </div>
         <nav class="sidebar-nav">
-            <a class="nav-item" href="/ui/keys">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>
-                Key 管理
-            </a>
             <a class="nav-item" href="/ui/channels">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></g></svg>
                 渠道
+            </a>
+            <a class="nav-item" href="/ui/mappings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m18 2 4 4-12 12H6v-4Zm-3.303-1.293L20.707 6.5M6 13l-3.793 3.793M3 21l3-3"/></g></svg>
+                映射
             </a>
             <a class="nav-item" href="/ui/logs">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 12h-5m5-4h-5m9 9V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></g></svg>
@@ -67,13 +67,13 @@
             <div class="card" style="margin-top:1.25rem;">
                 <div class="card-header">
                     <div class="card-title">配置备份</div>
-                    <div class="card-description">导出或导入渠道、API Key、代理 Key 与设置；请求日志不会写入备份</div>
+                    <div class="card-description">导出或导入渠道、API Key、代理 Key、模型映射与设置；请求日志不会写入备份</div>
                 </div>
                 <div class="card-content">
                     <div class="settings-group">
                         <div class="field-group">
                             <label>备份文件</label>
-                            <div class="field-hint">导入会按渠道前缀和 Key 值合并已有数据，并覆盖备注、状态、默认模型与用量统计</div>
+                            <div class="field-hint">导入会按渠道前缀、Key 值和映射名称合并已有数据，并覆盖备注、状态、默认模型与用量统计</div>
                         </div>
                         <div class="field-actions" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                             <button class="btn btn-outline" id="exportBackupBtn" onclick="exportBackup()">
@@ -249,7 +249,9 @@
                 const channels = backup.channels?.length || 0;
                 const keys = backup.keys?.length || 0;
                 const proxyKeys = backup.proxy_keys?.length || 0;
-                if (!confirm(`确定导入 ${file.name}？\n渠道 ${channels} 个，API Key ${keys} 个，代理 Key ${proxyKeys} 个。`)) return;
+                const modelMappings = backup.model_mappings?.length || 0;
+                const settings = backup.settings ? Object.keys(backup.settings).length : 0;
+                if (!confirm(`确定导入 ${file.name}？\n\n渠道: ${channels} 个\nAPI Key: ${keys} 个\n代理 Key: ${proxyKeys} 个\n模型映射: ${modelMappings} 个\n设置项: ${settings} 个\n\n导入将按渠道前缀、Key 和映射名称合并数据，已有数据会被更新。`)) return;
 
                 btn.disabled = true;
                 btn.innerHTML = `${ICO.wrench}导入中`;
@@ -262,7 +264,7 @@
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || '导入失败');
                 const s = data.summary || {};
-                result.innerHTML = `<div class="result-success-banner">${ICO.check}<span>导入完成：渠道 ${s.channels || 0}，API Key ${s.keys || 0}，代理 Key ${s.proxy_keys || 0}，设置 ${s.settings || 0}</span></div>`;
+                result.innerHTML = `<div class="result-success-banner">${ICO.check}<span>导入完成 — 渠道: ${s.channels || 0}，API Key: ${s.keys || 0}，代理 Key: ${s.proxy_keys || 0}，模型映射: ${s.model_mappings || 0}，设置: ${s.settings || 0}</span></div>`;
                 await loadProxyKeys();
             } catch (e) {
                 result.innerHTML = `<div class="result-error-banner">${ICO.cross}<span>导入失败：${e.message}</span></div>`;

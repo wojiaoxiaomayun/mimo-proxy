@@ -16,12 +16,12 @@
         </div>
         <nav class="sidebar-nav">
             <a class="nav-item active" href="/ui/keys">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>
-                Key 管理
-            </a>
-            <a class="nav-item" href="/ui/channels">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></g></svg>
                 渠道
+            </a>
+            <a class="nav-item" href="/ui/mappings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m18 2 4 4-12 12H6v-4Zm-3.303-1.293L20.707 6.5M6 13l-3.793 3.793M3 21l3-3"/></g></svg>
+                映射
             </a>
             <a class="nav-item" href="/ui/logs">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 12h-5m5-4h-5m9 9V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></g></svg>
@@ -369,12 +369,16 @@
             try {
                 const res = await fetch(API_BASE + '/models?channel=' + editKeyData.channel_id + '&key=' + encodeURIComponent(editKeyData.key));
                 const data = await res.json();
+                let allModels = (data.data || []).map(m => m.id);
+                const allowed = getChannelAllowedModels(editKeyData.channel_id);
+                if (allowed) {
+                    const allowedSet = new Set(allowed);
+                    allModels = allModels.filter(m => allowedSet.has(m));
+                }
                 let opts = '<option value="">不指定（透传原始模型）</option>';
-                if (data.data && data.data.length > 0) {
-                    for (const m of data.data) {
-                        const selected = m.id === editKeyData.default_model ? ' selected' : '';
-                        opts += `<option value="${m.id}"${selected}>${m.id}</option>`;
-                    }
+                for (const m of allModels) {
+                    const selected = m === editKeyData.default_model ? ' selected' : '';
+                    opts += `<option value="${m}"${selected}>${m}</option>`;
                 }
                 sel.innerHTML = opts;
             } catch (e) { sel.innerHTML = '<option value="">不指定（透传原始模型）</option>'; }
@@ -399,6 +403,12 @@
 
         /* ========== Add Key Modal ========== */
 
+        function getChannelAllowedModels(channelID) {
+            const ch = allChannels.find(c => c.id == channelID);
+            if (!ch || !ch.allowed_models || ch.allowed_models.length === 0) return null;
+            return ch.allowed_models;
+        }
+
         async function fetchModelsForKey() {
             const channelID = document.getElementById('addKeyChannel').value;
             const key = document.getElementById('addKeyInput').value.trim();
@@ -410,10 +420,14 @@
             try {
                 const res = await fetch(API_BASE + '/models?channel=' + channelID + '&key=' + encodeURIComponent(key));
                 const data = await res.json();
-                let opts = '<option value="">不指定（透传原始模型）</option>';
-                if (data.data && data.data.length > 0) {
-                    for (const m of data.data) opts += `<option value="${m.id}">${m.id}</option>`;
+                let allModels = (data.data || []).map(m => m.id);
+                const allowed = getChannelAllowedModels(channelID);
+                if (allowed) {
+                    const allowedSet = new Set(allowed);
+                    allModels = allModels.filter(m => allowedSet.has(m));
                 }
+                let opts = '<option value="">不指定（透传原始模型）</option>';
+                for (const m of allModels) opts += `<option value="${m}">${m}</option>`;
                 sel.innerHTML = opts;
             } catch (e) {
                 sel.innerHTML = '<option value="">不指定（透传原始模型）</option>';

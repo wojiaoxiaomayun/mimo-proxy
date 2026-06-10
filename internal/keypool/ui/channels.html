@@ -15,13 +15,13 @@
             </div>
         </div>
         <nav class="sidebar-nav">
-            <a class="nav-item" href="/ui/keys">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>
-                Key 管理
-            </a>
             <a class="nav-item active" href="/ui/channels">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></g></svg>
                 渠道
+            </a>
+            <a class="nav-item" href="/ui/mappings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m18 2 4 4-12 12H6v-4Zm-3.303-1.293L20.707 6.5M6 13l-3.793 3.793M3 21l3-3"/></g></svg>
+                映射
             </a>
             <a class="nav-item" href="/ui/logs">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 12h-5m5-4h-5m9 9V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></g></svg>
@@ -47,6 +47,28 @@
                     添加渠道
                 </button>
             </div>
+            <div style="display:flex;gap:0.75rem;margin-top:1rem;">
+                <div class="base-url-card" onclick="copyBaseUrl('openai')" style="flex:1;display:flex;align-items:center;gap:0.75rem;padding:0.75rem 1rem;background:linear-gradient(135deg,hsl(142 76% 36% / 0.08),hsl(142 76% 36% / 0.03));border:1px solid hsl(142 76% 36% / 0.2);border-radius:var(--radius);cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='hsl(142 76% 36% / 0.5)';this.style.background='linear-gradient(135deg,hsl(142 76% 36% / 0.12),hsl(142 76% 36% / 0.05))'" onmouseout="this.style.borderColor='hsl(142 76% 36% / 0.2)';this.style.background='linear-gradient(135deg,hsl(142 76% 36% / 0.08),hsl(142 76% 36% / 0.03))'">
+                    <div style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;background:hsl(142 76% 36% / 0.15);border-radius:0.5rem;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="hsl(142 76% 36%)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2M4 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2z"/></svg>
+                    </div>
+                    <div style="flex:1;">
+                        <div style="font-weight:500;font-size:0.875rem;">OpenAI Base URL</div>
+                        <div style="font-family:monospace;font-size:0.75rem;color:hsl(var(--muted-foreground));margin-top:0.125rem;">/v1</div>
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" style="color:hsl(var(--muted-foreground));"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2M4 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2z"/></svg>
+                </div>
+                <div class="base-url-card" onclick="copyBaseUrl('anthropic')" style="flex:1;display:flex;align-items:center;gap:0.75rem;padding:0.75rem 1rem;background:linear-gradient(135deg,hsl(262 84% 55% / 0.08),hsl(262 84% 55% / 0.03));border:1px solid hsl(262 84% 55% / 0.2);border-radius:var(--radius);cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='hsl(262 84% 55% / 0.5)';this.style.background='linear-gradient(135deg,hsl(262 84% 55% / 0.12),hsl(262 84% 55% / 0.05))'" onmouseout="this.style.borderColor='hsl(262 84% 55% / 0.2)';this.style.background='linear-gradient(135deg,hsl(262 84% 55% / 0.08),hsl(262 84% 55% / 0.03))'">
+                    <div style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;background:hsl(262 84% 55% / 0.15);border-radius:0.5rem;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="hsl(262 84% 55%)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2M4 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2z"/></svg>
+                    </div>
+                    <div style="flex:1;">
+                        <div style="font-weight:500;font-size:0.875rem;">Anthropic Base URL</div>
+                        <div style="font-family:monospace;font-size:0.75rem;color:hsl(var(--muted-foreground));margin-top:0.125rem;">/v1</div>
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" style="color:hsl(var(--muted-foreground));"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2M4 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2z"/></svg>
+                </div>
+            </div>
         </div>
         <div class="main-body">
             <div id="channelsGrid"></div>
@@ -64,6 +86,7 @@
             </div>
             <div class="modal-body">
                 <input type="hidden" id="chEditId">
+                <input type="hidden" id="chEditAllowedModelsSaved" value="">
                 <div class="field-group">
                     <label>渠道名称</label>
                     <input type="text" id="chName" placeholder="例如：MiMo 主力" style="width:100%;">
@@ -78,6 +101,14 @@
                     <input type="text" id="chBaseURL" placeholder="https://api.xiaomimimo.com/v1/chat/completions" style="width:100%;">
                 </div>
                 <div class="field-group" style="margin-top:1rem;">
+                    <label>渠道类型</label>
+                    <select id="chChannelType" style="width:100%;">
+                        <option value="openai">OpenAI — /v1/chat/completions 兼容格式</option>
+                        <option value="anthropic">Anthropic — /v1/messages 格式</option>
+                    </select>
+                    <div class="field-hint">OpenAI 兼容格式用于大多数供应商；Anthropic 格式用于 Claude 等原生 Anthropic API</div>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
                     <label>Key 选择模式</label>
                     <select id="chKeyMode" style="width:100%;">
                         <option value="round-robin">轮询 — 均匀分配请求到所有 Key</option>
@@ -85,23 +116,30 @@
                     </select>
                     <div class="field-hint">轮询模式按使用次数均匀分配；故障转移模式固定使用一个 Key，失败后自动切换</div>
                 </div>
+                <div class="field-group" id="channelKeySection" style="display:none;">
+                    <label>API Key 管理</label>
+                    <div id="channelKeysList" style="margin-bottom:0.75rem;"></div>
+                    <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+                        <input type="text" id="newChannelKey" placeholder="sk-..." style="flex:1;" onkeydown="if(event.key==='Enter')addChannelKey()">
+                        <input type="text" id="newChannelKeyNote" placeholder="备注" style="width:8rem;">
+                        <button class="btn btn-outline btn-sm" onclick="addChannelKey()">添加 Key</button>
+                    </div>
+                    <input type="hidden" id="chApiKey" value="">
+                </div>
                 <div class="separator"></div>
                 <div class="field-group">
-                    <label>API Key</label>
-                    <input type="text" id="chApiKey" placeholder="可选：创建渠道后同时添加 Key" style="width:100%;">
-                    <div class="field-hint">留空则只保存渠道；填写后会调用 Key 保存接口绑定到当前渠道</div>
-                </div>
-                <div class="field-group" style="margin-top:1rem;">
-                    <label>默认模型</label>
-                    <div style="display:flex;gap:0.5rem;">
-                        <select id="chDefaultModel" style="flex:1;">
-                            <option value="">不指定（透传原始模型）</option>
-                        </select>
-                        <button class="btn btn-outline" id="chRefreshModelsBtn" onclick="fetchModelsForChannelKey()" data-tip="刷新模型列表">
+                    <label>允许使用的模型 <span style="font-weight:400;color:hsl(var(--muted-foreground));font-size:0.8125rem;">（可选，多选）</span></label>
+                    <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem;">
+                        <span style="font-size:0.8125rem;color:hsl(var(--muted-foreground));">输入 Key 后点击刷新加载模型列表</span>
+                        <button class="btn btn-outline btn-sm" id="chRefreshModelsBtn" onclick="fetchAllowedModels()" data-tip="刷新模型列表">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9a9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5m5 4a9 9 0 0 1-9 9a9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></g></svg>
+                            刷新
                         </button>
                     </div>
-                    <div class="field-hint">若请求模型不在该 Key 的模型列表中，会自动替换为默认模型</div>
+                    <div id="allowedModelsGrid" style="max-height:200px;overflow-y:auto;border:1px solid hsl(var(--border));border-radius:var(--radius);padding:0.5rem;background:hsl(var(--background));">
+                        <div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));padding:0.5rem;">请先输入 API Key 并刷新模型列表</div>
+                    </div>
+                    <div class="field-hint">不选任何模型 = 允许所有模型；选择后此渠道只接受选中的模型</div>
                 </div>
                 <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
                     <button class="btn btn-outline" onclick="closeAddChannelModal()" style="flex:1;">取消</button>
@@ -139,31 +177,39 @@
                 const toggle = c.enabled
                     ? `<button class="btn btn-sm btn-ghost" data-tip="禁用" onclick="toggleChannel(${c.id}, false)">${ICO.toggleOn}</button>`
                     : `<button class="btn btn-sm btn-ghost" data-tip="启用" onclick="toggleChannel(${c.id}, true)">${ICO.toggleOff}</button>`;
-                const defaultBtn = c.is_default
-                    ? `<button class="btn btn-sm btn-ghost" data-tip="默认渠道" disabled style="color:hsl(38 92% 45%);opacity:1;">${ICO.star}</button>`
-                    : `<button class="btn btn-sm btn-ghost" data-tip="设为默认" onclick="setDefaultChannel(${c.id})">${ICO.star}</button>`;
                 const modeLabel = c.key_mode === 'failover'
                     ? '<span class="badge badge-warning"><span class="badge-dot"></span>故障转移</span>'
                     : '<span class="badge" style="background:hsl(var(--muted));color:hsl(var(--muted-foreground));">轮询</span>';
-                const proxyUrl = location.origin + '/c/' + c.prefix + '/v1';
+                const typeLabel = c.channel_type === 'anthropic'
+                    ? '<span class="badge" style="background:hsl(262 84.2% 60.2%);color:white;">Anthropic</span>'
+                    : '<span class="badge" style="background:hsl(var(--muted));color:hsl(var(--muted-foreground));">OpenAI</span>';
+                const proxyBase = location.origin + '/c/' + c.prefix;
+                let proxyUrl, proxyUrlDisplay;
+                if (c.channel_type === 'anthropic') {
+                    proxyUrl = proxyBase + '/v1/messages';
+                    proxyUrlDisplay = `<div style="font-family:monospace;font-size:0.8125rem;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${proxyUrl}">${proxyUrl}</div>`;
+                } else {
+                    proxyUrl = proxyBase + '/v1/chat/completions';
+                    proxyUrlDisplay = `<div style="font-family:monospace;font-size:0.8125rem;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${proxyUrl}">${proxyUrl}</div>`;
+                }
                 rows += `<tr>
                     <td style="font-weight:500;">${c.name || '-'}</td>
                     <td style="font-family:monospace;font-size:0.8125rem;"><code>/c/${c.prefix}</code></td>
+                    <td>${typeLabel}</td>
                     <td class="td-key" title="${c.base_url}" style="max-width:260px;">${c.base_url}</td>
-                    <td style="font-family:monospace;font-size:0.8125rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${proxyUrl}">${proxyUrl}</td>
+                    <td>${proxyUrlDisplay}</td>
                     <td>${modeLabel}</td>
                     <td>${badge}</td>
                     <td class="td-actions"><div class="btn-group">
                         <button class="btn btn-sm btn-ghost" data-tip="复制代理URL" onclick="copyProxyUrl('${proxyUrl}')">${ICO.copy}</button>
                         <button class="btn btn-sm btn-ghost" data-tip="编辑" onclick='openEditChannelModal(${JSON.stringify(c).replace(/'/g,"&#39;")})'>${ICO.pencil}</button>
-                        ${defaultBtn}
                         ${toggle}
                         <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeChannel(${c.id})">${ICO.trash}</button>
                     </div></td>
                 </tr>`;
             }
             grid.innerHTML = `<div class="table-wrapper"><table><thead><tr>
-                <th>名称</th><th>前缀</th><th>上游 URL</th><th>代理 URL</th><th>模式</th><th>状态</th><th style="text-align:right">操作</th>
+                <th>名称</th><th>前缀</th><th>类型</th><th>上游 URL</th><th>代理 URL</th><th>模式</th><th>状态</th><th style="text-align:right">操作</th>
             </tr></thead><tbody>${rows}</tbody></table></div>`;
         }
 
@@ -171,87 +217,193 @@
             navigator.clipboard.writeText(url).then(() => showToast('已复制: ' + url));
         }
 
-        async function setDefaultChannel(id) {
-            await fetch(API_BASE + '/channels', {
+        function copyBaseUrl(type) {
+            const base = location.origin;
+            const url = type === 'anthropic' ? base + '/anthropic/v1' : base + '/openai/v1';
+            navigator.clipboard.writeText(url).then(() => showToast('已复制 ' + (type === 'anthropic' ? 'Anthropic' : 'OpenAI') + ' Base URL: ' + url));
+        }
+
+        function populateAllowedModelsGrid(models, savedModels) {
+            const grid = document.getElementById('allowedModelsGrid');
+            if (!models || models.length === 0) {
+                grid.innerHTML = '<div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));padding:0.5rem;">未获取到模型</div>';
+                return;
+            }
+            const saved = new Set(savedModels || []);
+            let html = '';
+            for (const m of models) {
+                const checked = saved.has(m) ? ' checked' : '';
+                html += `<label class="allowed-model-item" style="display:flex;align-items:center;gap:0.5rem;padding:0.375rem 0.5rem;cursor:pointer;border-radius:var(--radius);font-size:0.8125rem;" onmouseover="this.style.background='hsl(var(--muted))'" onmouseout="this.style.background='transparent'">
+                    <input type="checkbox" class="allowed-model-cb" value="${m}"${checked}>
+                    <span>${m}</span>
+                </label>`;
+            }
+            grid.innerHTML = html;
+        }
+
+        function maskKey(key) {
+            if (!key || key.length <= 8) return key || '';
+            return key.substring(0, 6) + '...' + key.substring(key.length - 4);
+        }
+
+        let channelKeysEditing = false;
+
+        async function loadChannelKeys() {
+            const editId = document.getElementById('chEditId').value;
+            if (!editId) return;
+            try {
+                const res = await fetch(API_BASE + '/keys?channel=' + editId);
+                const data = await res.json();
+                renderChannelKeysList(data.keys || []);
+            } catch (e) { console.error('loadChannelKeys:', e); }
+        }
+
+        function renderChannelKeysList(keys) {
+            const el = document.getElementById('channelKeysList');
+            if (!keys || keys.length === 0) {
+                el.innerHTML = '<div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));padding:0.5rem;">暂无 Key，请在下方添加</div>';
+                return;
+            }
+            let html = '<div style="display:flex;flex-direction:column;gap:0.375rem;max-height:200px;overflow-y:auto;">';
+            for (const k of keys) {
+                const statusDot = k.enabled
+                    ? (k.is_active ? 'badge-success' : 'badge-success" style="opacity:0.5')
+                    : 'badge-warning';
+                const statusLabel = k.enabled ? (k.is_active ? '使用中' : '启用') : '禁用';
+                html += `<div style="display:flex;align-items:center;gap:0.5rem;padding:0.375rem 0.5rem;background:hsl(var(--muted));border-radius:var(--radius);font-size:0.8125rem;">
+                    <span class="badge ${statusDot}" style="flex-shrink:0;"><span class="badge-dot"></span>${statusLabel}</span>
+                    <code style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${k.key}">${maskKey(k.key)}</code>
+                    ${k.note ? `<span style="color:hsl(var(--muted-foreground));max-width:6rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${k.note}">${k.note}</span>` : ''}
+                    <span style="color:hsl(var(--muted-foreground));font-size:0.75rem;white-space:nowrap;">${k.usage_count}次</span>
+                    <div style="display:flex;gap:0.25rem;flex-shrink:0;">
+                        <button class="btn btn-sm btn-ghost" data-tip="${k.enabled ? '禁用' : '启用'}" onclick="toggleChannelKey('${k.key}', ${k.enabled})">${k.enabled ? ICO.toggleOn : ICO.toggleOff}</button>
+                        <button class="btn btn-sm btn-ghost" data-tip="${k.is_active ? '取消固定' : '固定使用'}" style="${k.is_pinned ? 'color:hsl(38 92% 45%)' : ''}" onclick="${k.is_active ? 'unpinChannelKey()' : `pinChannelKey('${k.key}')`}">${ICO.pin}</button>
+                        <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeChannelKey('${k.key}')">${ICO.trash}</button>
+                    </div>
+                </div>`;
+            }
+            html += '</div>';
+            el.innerHTML = html;
+        }
+
+        async function addChannelKey() {
+            const editId = document.getElementById('chEditId').value;
+            const key = document.getElementById('newChannelKey').value.trim();
+            const note = document.getElementById('newChannelKeyNote').value.trim();
+            if (!key) { document.getElementById('newChannelKey').focus(); return; }
+            if (!editId) { showToast('请先保存渠道', true); return; }
+            try {
+                const res = await fetch(API_BASE + '/keys', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'add', key, note, channel_id: parseInt(editId), default_model: ''})
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || '添加失败');
+                document.getElementById('newChannelKey').value = '';
+                document.getElementById('newChannelKeyNote').value = '';
+                await loadChannelKeys();
+                showToast('Key 已添加');
+            } catch (e) { alert('添加失败: ' + (e.message || e)); }
+        }
+
+        async function toggleChannelKey(key, on) {
+            await fetch(API_BASE + '/keys', {
                 method: 'POST', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({action:'set-default', id})
+                body: JSON.stringify({action: on ? 'disable' : 'enable', key})
             });
-            await loadChannels();
-            showToast('已设为默认渠道');
+            await loadChannelKeys();
+        }
+
+        async function removeChannelKey(key) {
+            if (!confirm('确定删除此 Key？')) return;
+            await fetch(API_BASE + '/keys', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({action:'remove', key})
+            });
+            await loadChannelKeys();
+            showToast('Key 已删除');
+        }
+
+        async function pinChannelKey(key) {
+            const editId = document.getElementById('chEditId').value;
+            await fetch(API_BASE + '/keys', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({action:'pin-key', key, channel_id: parseInt(editId)})
+            });
+            await loadChannelKeys();
+            showToast('已固定为使用 Key');
+        }
+
+        async function unpinChannelKey() {
+            const editId = document.getElementById('chEditId').value;
+            await fetch(API_BASE + '/keys', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({action:'unpin-key', channel_id: parseInt(editId)})
+            });
+            await loadChannelKeys();
+            showToast('已取消固定');
         }
 
         function openAddChannelModal() {
             document.getElementById('chName').value = '';
             document.getElementById('chPrefix').value = '';
             document.getElementById('chBaseURL').value = '';
+            document.getElementById('chChannelType').value = 'openai';
             document.getElementById('chKeyMode').value = 'round-robin';
             document.getElementById('chApiKey').value = '';
-            document.getElementById('chDefaultModel').innerHTML = '<option value="">不指定（透传原始模型）</option>';
             document.getElementById('chEditId').value = '';
+            document.getElementById('chEditAllowedModelsSaved').value = '';
+            document.getElementById('channelKeySection').style.display = 'none';
+            populateAllowedModelsGrid([], []);
             document.querySelector('#addChannelModal .modal-title').textContent = '添加渠道';
             document.getElementById('addChannelModal').classList.add('open');
+            channelKeysEditing = false;
+            setTimeout(() => document.getElementById('chName').focus(), 100);
         }
 
-        function openEditChannelModal(c) {
+        async function openEditChannelModal(c) {
             document.getElementById('chName').value = c.name || '';
             document.getElementById('chPrefix').value = c.prefix || '';
             document.getElementById('chBaseURL').value = c.base_url || '';
+            document.getElementById('chChannelType').value = c.channel_type || 'openai';
             document.getElementById('chKeyMode').value = c.key_mode || 'round-robin';
             document.getElementById('chApiKey').value = '';
-            document.getElementById('chDefaultModel').innerHTML = '<option value="">不指定（透传原始模型）</option>';
             document.getElementById('chEditId').value = c.id;
+            const saved = c.allowed_models || [];
+            document.getElementById('chEditAllowedModelsSaved').value = JSON.stringify(saved);
+            populateAllowedModelsGrid([], saved);
+            document.getElementById('channelKeySection').style.display = '';
+            channelKeysEditing = true;
             document.querySelector('#addChannelModal .modal-title').textContent = '编辑渠道';
             document.getElementById('addChannelModal').classList.add('open');
+            loadChannelKeys();
+            // Fetch active key for allowed models refresh
+            try {
+                const res = await fetch(API_BASE + '/keys?channel=' + c.id);
+                const data = await res.json();
+                const keys = data.keys || [];
+                const activeKey = keys.find(k => k.is_active);
+                if (activeKey) {
+                    document.getElementById('chApiKey').value = activeKey.key;
+                }
+            } catch (e) { /* ignore */ }
         }
 
         function closeAddChannelModal() {
             document.getElementById('addChannelModal').classList.remove('open');
+            channelKeysEditing = false;
         }
 
-        async function submitAddChannel() {
-            const name = document.getElementById('chName').value.trim();
-            const prefix = document.getElementById('chPrefix').value.trim();
-            const base_url = document.getElementById('chBaseURL').value.trim();
-            const key_mode = document.getElementById('chKeyMode').value;
-            const key = document.getElementById('chApiKey').value.trim();
-            const default_model = document.getElementById('chDefaultModel').value || '';
-            const editId = document.getElementById('chEditId').value;
-            if (!prefix) { document.getElementById('chPrefix').focus(); showToast('前缀不能为空', true); return; }
-            if (!base_url) { document.getElementById('chBaseURL').focus(); return; }
-            try {
-                const action = editId ? 'update' : 'add';
-                const body = {action, name, prefix, base_url, key_mode};
-                if (editId) body.id = parseInt(editId);
-                const res = await fetch(API_BASE + '/channels', {
-                    method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify(body)
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.error || '渠道保存失败');
-                const channelID = editId ? parseInt(editId) : data.id;
-                if (key && channelID) {
-                    const keyRes = await fetch(API_BASE + '/keys', {
-                        method: 'POST', headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({action:'add', key, note:'', channel_id: channelID, default_model})
-                    });
-                    const keyData = await keyRes.json().catch(() => ({}));
-                    if (!keyRes.ok) throw new Error(keyData.error || 'Key 保存失败');
-                }
-                closeAddChannelModal();
-                await loadChannels();
-                showToast(key ? (editId ? '渠道和 Key 已保存' : '渠道和 Key 已添加') : (editId ? '渠道已更新' : '渠道已添加'));
-            } catch (e) { alert('操作失败: ' + (e.message || e)); }
-        }
-
-        async function fetchModelsForChannelKey() {
+        async function fetchAllowedModels() {
             const key = document.getElementById('chApiKey').value.trim();
             const baseURL = document.getElementById('chBaseURL').value.trim();
             const editId = document.getElementById('chEditId').value;
-            const sel = document.getElementById('chDefaultModel');
+            const channelType = document.getElementById('chChannelType').value;
             const btn = document.getElementById('chRefreshModelsBtn');
             if (!key) { document.getElementById('chApiKey').focus(); showToast('请先输入 Key', true); return; }
             if (!baseURL) { document.getElementById('chBaseURL').focus(); showToast('请先输入 Base URL', true); return; }
-            sel.innerHTML = '<option value="">加载中…</option>';
+            const grid = document.getElementById('allowedModelsGrid');
+            grid.innerHTML = '<div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));padding:0.5rem;"><span class="spinner" style="width:1rem;height:1rem;display:inline-block;vertical-align:middle;margin-right:0.5rem;"></span>加载中…</div>';
             btn.disabled = true;
             try {
                 const params = new URLSearchParams({key});
@@ -259,17 +411,48 @@
                 else params.set('base_url', baseURL);
                 const res = await fetch(API_BASE + '/models?' + params.toString());
                 const data = await res.json();
-                let opts = '<option value="">不指定（透传原始模型）</option>';
-                if (data.data && data.data.length > 0) {
-                    for (const m of data.data) opts += `<option value="${m.id}">${m.id}</option>`;
+                const models = (data.data || []).map(m => m.id);
+                // Get previously selected models from checkboxes or saved data
+                const prevChecked = new Set();
+                document.querySelectorAll('#allowedModelsGrid .allowed-model-cb:checked').forEach(cb => prevChecked.add(cb.value));
+                if (prevChecked.size === 0) {
+                    try { JSON.parse(document.getElementById('chEditAllowedModelsSaved').value || '[]').forEach(m => prevChecked.add(m)); } catch(_){}
                 }
-                sel.innerHTML = opts;
+                populateAllowedModelsGrid(models, [...prevChecked]);
             } catch (e) {
-                sel.innerHTML = '<option value="">不指定（透传原始模型）</option>';
+                grid.innerHTML = '<div style="font-size:0.8125rem;color:hsl(var(--destructive));padding:0.5rem;">模型列表获取失败</div>';
                 showToast('模型列表获取失败', true);
             } finally {
                 btn.disabled = false;
             }
+        }
+
+        async function submitAddChannel() {
+            const name = document.getElementById('chName').value.trim();
+            const prefix = document.getElementById('chPrefix').value.trim();
+            const base_url = document.getElementById('chBaseURL').value.trim();
+            const channel_type = document.getElementById('chChannelType').value;
+            const key_mode = document.getElementById('chKeyMode').value;
+            const editId = document.getElementById('chEditId').value;
+            // Collect allowed_models from checkboxes
+            const allowed_models = [];
+            document.querySelectorAll('#allowedModelsGrid .allowed-model-cb:checked').forEach(cb => allowed_models.push(cb.value));
+            if (!prefix) { document.getElementById('chPrefix').focus(); showToast('前缀不能为空', true); return; }
+            if (!base_url) { document.getElementById('chBaseURL').focus(); return; }
+            try {
+                const action = editId ? 'update' : 'add';
+                const body = {action, name, prefix, base_url, channel_type, key_mode, allowed_models};
+                if (editId) body.id = parseInt(editId);
+                const res = await fetch(API_BASE + '/channels', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || '渠道保存失败');
+                closeAddChannelModal();
+                await loadChannels();
+                showToast(editId ? '渠道已更新' : '渠道已添加');
+            } catch (e) { alert('操作失败: ' + (e.message || e)); }
         }
 
         async function toggleChannel(id, enable) {

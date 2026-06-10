@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiMo Proxy - 模型映射</title>
+    <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-brand">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></g></svg>
+                MiMo Proxy
+            </div>
+        </div>
+        <nav class="sidebar-nav">
+            <a class="nav-item" href="/ui/channels">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></g></svg>
+                渠道
+            </a>
+            <a class="nav-item active" href="/ui/mappings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m18 2 4 4-12 12H6v-4Zm-3.303-1.293L20.707 6.5M6 13l-3.793 3.793M3 21l3-3"/></g></svg>
+                映射
+            </a>
+            <a class="nav-item" href="/ui/logs">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M15 12h-5m5-4h-5m9 9V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></g></svg>
+                日志
+            </a>
+            <a class="nav-item" href="/ui/settings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0a2.34 2.34 0 0 0 3.319 1.915a2.34 2.34 0 0 1 2.33 4.033a2.34 2.34 0 0 0 0 3.831a2.34 2.34 0 0 1-2.33 4.033a2.34 2.34 0 0 0-3.319 1.915a2.34 2.34 0 0 1-4.659 0a2.34 2.34 0 0 0-3.32-1.915a2.34 2.34 0 0 1-2.33-4.033a2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g></svg>
+                设置
+            </a>
+        </nav>
+        <div class="sidebar-footer">MiMo Key Pool Proxy</div>
+    </aside>
+
+    <div class="main">
+        <div class="main-header">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <h1>模型映射</h1>
+                    <p>将自定义模型名映射到指定渠道的模型，请求时自动转发</p>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="openAddMappingModal()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
+                    添加映射
+                </button>
+            </div>
+        </div>
+        <div class="main-body">
+            <div id="mappingsGrid"></div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Mapping Modal -->
+    <div class="modal-overlay" id="mappingModal">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title" id="mappingModalTitle">添加映射</div>
+                <button class="modal-close" onclick="closeMappingModal()" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="mappingEditId">
+                <div class="field-group">
+                    <label>映射名称 <span style="color:hsl(0 84.2% 60.2%)">*</span></label>
+                    <input type="text" id="mappingName" placeholder="例如：gpt5, claude4" style="width:100%;">
+                    <div class="field-hint">客户端请求此模型名时，自动转发到下方渠道的目标模型</div>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>目标渠道 <span style="color:hsl(0 84.2% 60.2%)">*</span></label>
+                    <select id="mappingChannel" style="width:100%;" onchange="onMappingChannelChange()"></select>
+                    <div class="field-hint" id="mappingChannelHint">选择渠道后，只能选择该渠道类型对应的模型</div>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>目标模型 <span style="color:hsl(0 84.2% 60.2%)">*</span></label>
+                    <div style="display:flex;gap:0.5rem;">
+                        <select id="mappingModel" style="flex:1;">
+                            <option value="">请先选择渠道并加载模型</option>
+                        </select>
+                        <button class="btn btn-outline" id="mappingRefreshBtn" onclick="fetchMappingModels()" data-tip="刷新模型列表">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9a9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5m5 4a9 9 0 0 1-9 9a9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></g></svg>
+                        </button>
+                    </div>
+                    <div class="field-hint" id="mappingModelHint">需要输入渠道的 API Key 来获取模型列表</div>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>备注</label>
+                    <input type="text" id="mappingNote" placeholder="可选备注" style="width:100%;">
+                </div>
+                <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
+                    <button class="btn btn-outline" onclick="closeMappingModal()" style="flex:1;">取消</button>
+                    <button class="btn btn-primary" onclick="submitMapping()" style="flex:1;">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Key Input Modal for fetching models -->
+    <div class="modal-overlay" id="keyInputModal">
+        <div class="modal" style="max-width:24rem;" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">输入 API Key</div>
+                <button class="modal-close" onclick="document.getElementById('keyInputModal').classList.remove('open')" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="field-group">
+                    <label>API Key</label>
+                    <input type="text" id="keyInputValue" placeholder="输入该渠道的 API Key" style="width:100%;" onkeydown="if(event.key==='Enter')confirmKeyInput()">
+                    <div class="field-hint">用于从上游获取可用模型列表，不会保存</div>
+                </div>
+                <div style="margin-top:1rem;display:flex;gap:0.5rem;">
+                    <button class="btn btn-outline" onclick="document.getElementById('keyInputModal').classList.remove('open')" style="flex:1;">取消</button>
+                    <button class="btn btn-primary" onclick="confirmKeyInput()" style="flex:1;">确定</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="/ui/common.js"></script>
+    <script>
+        let allChannels = [];
+        let channelKeys = {}; // channelID → active key (cached)
+
+        async function loadChannels() {
+            try {
+                const res = await fetch(API_BASE + '/channels');
+                const data = await res.json();
+                allChannels = (data.channels || []).filter(c => c.enabled);
+            } catch (e) { console.error('loadChannels:', e); }
+        }
+
+        async function loadMappings() {
+            try {
+                const res = await fetch(API_BASE + '/model-mappings');
+                const data = await res.json();
+                renderMappings(data.mappings || []);
+            } catch (e) { console.error('loadMappings:', e); }
+        }
+
+        function renderMappings(mappings) {
+            const grid = document.getElementById('mappingsGrid');
+            if (!mappings || mappings.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><p>暂无模型映射</p><p class="empty-hint">添加映射将自定义模型名指向指定渠道的模型</p></div>';
+                return;
+            }
+            let rows = '';
+            for (const m of mappings) {
+                const typeLabel = m.channel_type === 'anthropic'
+                    ? '<span class="badge" style="background:hsl(262 84.2% 60.2%);color:white;">Anthropic</span>'
+                    : '<span class="badge" style="background:hsl(var(--muted));color:hsl(var(--muted-foreground));">OpenAI</span>';
+                const statusBadge = m.enabled
+                    ? '<span class="badge badge-success"><span class="badge-dot"></span>启用</span>'
+                    : '<span class="badge badge-warning"><span class="badge-dot"></span>禁用</span>';
+                rows += `<tr>
+                    <td style="font-weight:600;font-family:monospace;">${m.name}</td>
+                    <td>${typeLabel}</td>
+                    <td>${m.channel_name || '-'}</td>
+                    <td style="font-family:monospace;font-size:0.8125rem;">${m.target_model}</td>
+                    <td style="color:hsl(var(--muted-foreground));font-size:0.8125rem;">${m.note || '-'}</td>
+                    <td>${statusBadge}</td>
+                    <td class="td-actions"><div class="btn-group">
+                        <button class="btn btn-sm btn-ghost" data-tip="编辑" onclick='openEditMappingModal(${JSON.stringify(m).replace(/'/g,"&#39;")})'>${ICO.pencil}</button>
+                        <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeMapping(${m.id})">${ICO.trash}</button>
+                    </div></td>
+                </tr>`;
+            }
+            grid.innerHTML = `<div class="table-wrapper"><table><thead><tr>
+                <th>映射名称</th><th>类型</th><th>目标渠道</th><th>目标模型</th><th>备注</th><th>状态</th><th style="text-align:right">操作</th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
+        }
+
+        /* ========== Modal ========== */
+
+        function openAddMappingModal() {
+            document.getElementById('mappingEditId').value = '';
+            document.getElementById('mappingName').value = '';
+            document.getElementById('mappingNote').value = '';
+            document.getElementById('mappingModel').innerHTML = '<option value="">请先选择渠道并加载模型</option>';
+            populateChannelSelect();
+            document.getElementById('mappingModalTitle').textContent = '添加映射';
+            document.getElementById('mappingModal').classList.add('open');
+            setTimeout(() => document.getElementById('mappingName').focus(), 100);
+        }
+
+        function openEditMappingModal(m) {
+            document.getElementById('mappingEditId').value = m.id;
+            document.getElementById('mappingName').value = m.name || '';
+            document.getElementById('mappingNote').value = m.note || '';
+            populateChannelSelect();
+            document.getElementById('mappingChannel').value = m.channel_id;
+            // Show the current target model as an option
+            document.getElementById('mappingModel').innerHTML = `<option value="${m.target_model}" selected>${m.target_model}</option>`;
+            document.getElementById('mappingModalTitle').textContent = '编辑映射';
+            document.getElementById('mappingModal').classList.add('open');
+        }
+
+        function closeMappingModal() {
+            document.getElementById('mappingModal').classList.remove('open');
+        }
+
+        function populateChannelSelect() {
+            const sel = document.getElementById('mappingChannel');
+            sel.innerHTML = '<option value="">选择渠道</option>' +
+                allChannels.map(c => {
+                    const typeTag = c.channel_type === 'anthropic' ? ' [Anthropic]' : ' [OpenAI]';
+                    return `<option value="${c.id}">${c.name || c.prefix}${typeTag}</option>`;
+                }).join('');
+        }
+
+        function onMappingChannelChange() {
+            document.getElementById('mappingModel').innerHTML = '<option value="">点击刷新获取模型列表</option>';
+        }
+
+        /* ========== Fetch Models ========== */
+
+        let keyInputResolve = null;
+
+        function promptForKey() {
+            return new Promise((resolve) => {
+                keyInputResolve = resolve;
+                document.getElementById('keyInputValue').value = '';
+                document.getElementById('keyInputModal').classList.add('open');
+                setTimeout(() => document.getElementById('keyInputValue').focus(), 100);
+            });
+        }
+
+        function confirmKeyInput() {
+            const key = document.getElementById('keyInputValue').value.trim();
+            document.getElementById('keyInputModal').classList.remove('open');
+            if (keyInputResolve) {
+                keyInputResolve(key);
+                keyInputResolve = null;
+            }
+        }
+
+        async function fetchMappingModels() {
+            const channelID = document.getElementById('mappingChannel').value;
+            if (!channelID) { showToast('请先选择渠道', true); return; }
+
+            // Try to find an active key for this channel
+            let key = channelKeys[channelID];
+            if (!key) {
+                try {
+                    const res = await fetch(API_BASE + '/keys?channel=' + channelID);
+                    const data = await res.json();
+                    const active = (data.keys || []).find(k => k.is_active && k.enabled);
+                    if (active) {
+                        key = active.key;
+                        channelKeys[channelID] = key;
+                    }
+                } catch (e) {}
+            }
+
+            if (!key) {
+                key = await promptForKey();
+                if (!key) return;
+                channelKeys[channelID] = key;
+            }
+
+            const sel = document.getElementById('mappingModel');
+            const btn = document.getElementById('mappingRefreshBtn');
+            const prevModel = sel.value;
+            sel.innerHTML = '<option value="">加载中…</option>';
+            btn.disabled = true;
+            try {
+                const res = await fetch(API_BASE + '/models?channel=' + channelID + '&key=' + encodeURIComponent(key));
+                const data = await res.json();
+                const models = (data.data || []).map(m => m.id);
+                if (models.length === 0) {
+                    sel.innerHTML = '<option value="">未获取到模型</option>';
+                    return;
+                }
+                let opts = '<option value="">选择模型</option>';
+                for (const m of models) {
+                    const selected = m === prevModel ? ' selected' : '';
+                    opts += `<option value="${m}"${selected}>${m}</option>`;
+                }
+                sel.innerHTML = opts;
+            } catch (e) {
+                sel.innerHTML = '<option value="">获取失败</option>';
+                showToast('模型列表获取失败', true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        /* ========== CRUD ========== */
+
+        async function submitMapping() {
+            const editId = document.getElementById('mappingEditId').value;
+            const name = document.getElementById('mappingName').value.trim();
+            const channel_id = parseInt(document.getElementById('mappingChannel').value) || 0;
+            const target_model = document.getElementById('mappingModel').value;
+            const note = document.getElementById('mappingNote').value.trim();
+            if (!name) { document.getElementById('mappingName').focus(); showToast('名称不能为空', true); return; }
+            if (!channel_id) { showToast('请选择渠道', true); return; }
+            if (!target_model) { showToast('请选择目标模型', true); return; }
+            try {
+                const action = editId ? 'update' : 'add';
+                const body = {action, name, channel_id, target_model, note};
+                if (editId) body.id = parseInt(editId);
+                const res = await fetch(API_BASE + '/model-mappings', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || '保存失败');
+                closeMappingModal();
+                await loadMappings();
+                showToast(editId ? '映射已更新' : '映射已添加');
+            } catch (e) { alert('操作失败: ' + (e.message || e)); }
+        }
+
+        async function removeMapping(id) {
+            if (!confirm('确定删除此映射？')) return;
+            await fetch(API_BASE + '/model-mappings', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({action:'remove', id})
+            });
+            await loadMappings();
+            showToast('映射已删除');
+        }
+
+        /* ========== Init ========== */
+        initModalClose('mappingModal');
+        initModalClose('keyInputModal');
+        (async () => {
+            await loadChannels();
+            await loadMappings();
+        })();
+    </script>
+</body>
+</html>

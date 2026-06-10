@@ -49,6 +49,17 @@ func TestImportBackupRestoresConfig(t *testing.T) {
 				CreatedAt: "2026-01-01 00:00:02",
 			},
 		},
+		ModelMappings: []ModelMapping{
+			{
+				ID:          1,
+				Name:        "test-model",
+				ChannelID:   42,
+				TargetModel: "real-model",
+				Note:        "test mapping",
+				Enabled:     true,
+				CreatedAt:   "2026-01-01 00:00:03",
+			},
+		},
 		Settings: map[string]string{"retention": "short"},
 	}
 
@@ -56,7 +67,7 @@ func TestImportBackupRestoresConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportBackup() error = %v", err)
 	}
-	if summary.Channels != 1 || summary.Keys != 1 || summary.ProxyKeys != 1 || summary.Settings != 1 {
+	if summary.Channels != 1 || summary.Keys != 1 || summary.ProxyKeys != 1 || summary.ModelMappings != 1 || summary.Settings != 1 {
 		t.Fatalf("ImportBackup() summary = %+v", summary)
 	}
 
@@ -94,6 +105,19 @@ func TestImportBackupRestoresConfig(t *testing.T) {
 	}
 	if !pool.ValidateProxyKey("sk-client") {
 		t.Fatal("imported proxy key is not valid")
+	}
+	var importedMapping *ModelMapping
+	for i := range exported.ModelMappings {
+		if exported.ModelMappings[i].Name == "test-model" {
+			importedMapping = &exported.ModelMappings[i]
+			break
+		}
+	}
+	if importedMapping == nil {
+		t.Fatal("imported model mapping was not exported")
+	}
+	if importedMapping.TargetModel != "real-model" || importedMapping.ChannelID != importedChannel.ID {
+		t.Fatalf("imported mapping = %+v", *importedMapping)
 	}
 	if got := pool.GetSetting("retention", ""); got != "short" {
 		t.Fatalf("GetSetting(retention) = %q", got)
