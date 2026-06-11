@@ -100,6 +100,7 @@ func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	mux.HandleFunc("/models", h.Models)
 	mux.HandleFunc("/channels", h.Channels)
 	mux.HandleFunc("/model-mappings", h.ModelMappings)
+	mux.HandleFunc("/test-mapping", h.TestMapping)
 	mux.HandleFunc("/settings", h.Settings)
 	mux.HandleFunc("/health-check", h.HealthCheck)
 	mux.HandleFunc("/proxy-keys", h.ProxyKeys)
@@ -1174,6 +1175,117 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// TestMapping sends a real request to the upstream API using the mapping's channel and target model,
+// verifying the mapping is reachable and the target model exists.
+func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID          int    `json:"id"`
+		ChannelID   int    `json:"channel_id"`
+		TargetModel string `json:"target_model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	// If ID is provided, look up the mapping
+	if req.ID > 0 {
+		mappings, _ := h.pool.GetAllModelMappings()
+		for _, m := range mappings {
+			if m.ID == req.ID {
+				req.ChannelID = m.ChannelID
+				req.TargetModel = m.TargetModel
+				break
+			}
+		}
+	}
+	if req.ChannelID == 0 {
+		http.Error(w, `{"error":"Channel not found"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Resolve channel
+	var channel *ChannelInfo
+	channels, _ := h.pool.GetAllChannels()
+	for _, c := range channels {
+		if c.ID == req.ChannelID {
+			channel = &c
+			break
+		}
+	}
+	if channel == nil {
+		http.Error(w, `{"error":"Channel not found"}`, http.StatusNotFound)
+		return
+	}
+
+	// Get a key for this channel
+	key, _, err := h.pool.GetKey(channel.ID)
+	if err != nil || key == "" {
+		http.Error(w, `{"error":"No available key for channel"}`, http.StatusBadGateway)
+		return
+	}
+
+	// Build and send test request
+	start := time.Now()
+	testURL := chatCompletionsURLFromBase(channel.BaseURL)
+	testBody := testPayload(req.TargetModel)
+	if channel.ChannelType == "anthropic" {
+		testURL = messagesURLFromBase(channel.BaseURL)
+		testBody = testMessagesPayload(req.TargetModel)
+	}
+
+	proxyReq, err := http.NewRequest(http.MethodPost, testURL, bytes.NewReader(testBody))
+	if err != nil {
+		http.Error(w, `{"error":"Failed to create request"}`, http.StatusInternalServerError)
+		return
+	}
+	proxyReq.Header.Set("Content-Type", "application/json")
+	if channel.ChannelType == "anthropic" {
+		proxyReq.Header.Set("x-api-key", key)
+		proxyReq.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		proxyReq.Header.Set("api-key", key)
+		proxyReq.Header.Set("Authorization", "Bearer "+key)
+	}
+	h.prepareUpstreamRequest(proxyReq)
+
+	client := h.upstreamClient(30 * time.Second)
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		http.Error(w, `{"error":"Request failed: `+err.Error()+`"}`, http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	latency := time.Since(start).Milliseconds()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	w.Header().Set("Content-Type", "application/json")
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "ok",
+			"latency": latency,
+			"data":    result,
+		})
+	} else {
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":     "error",
+			"code":       resp.StatusCode,
+			"latency":    latency,
+			"error_body": result,
+		})
 	}
 }
 

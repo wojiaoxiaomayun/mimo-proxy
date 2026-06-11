@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	port := flag.Int("port", 10080, "server port")
+	port := flag.Int("port", 10081, "server port")
 	flag.Parse()
 
 	targetURL := "https://api.xiaomimimo.com/v1/chat/completions"

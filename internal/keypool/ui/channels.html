@@ -247,6 +247,7 @@
         }
 
         let channelKeysEditing = false;
+        let pendingKeys = []; // Keys entered before channel is saved
 
         async function loadChannelKeys() {
             const editId = document.getElementById('chEditId').value;
@@ -260,25 +261,30 @@
 
         function renderChannelKeysList(keys) {
             const el = document.getElementById('channelKeysList');
-            if (!keys || keys.length === 0) {
+            const allKeys = [...(keys || []), ...pendingKeys.map(pk => ({key: pk.key, note: pk.note, enabled: true, is_active: false, usage_count: 0, _pending: true}))];
+            if (allKeys.length === 0) {
                 el.innerHTML = '<div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));padding:0.5rem;">暂无 Key，请在下方添加</div>';
                 return;
             }
             let html = '<div style="display:flex;flex-direction:column;gap:0.375rem;max-height:200px;overflow-y:auto;">';
-            for (const k of keys) {
-                const statusDot = k.enabled
+            for (const k of allKeys) {
+                const isPending = k._pending;
+                const statusDot = isPending ? 'badge" style="background:hsl(38 92% 50% / 0.15);color:hsl(38 92% 45%)' : (k.enabled
                     ? (k.is_active ? 'badge-success' : 'badge-success" style="opacity:0.5')
-                    : 'badge-warning';
-                const statusLabel = k.enabled ? (k.is_active ? '使用中' : '启用') : '禁用';
+                    : 'badge-warning');
+                const statusLabel = isPending ? '待保存' : (k.enabled ? (k.is_active ? '使用中' : '启用') : '禁用');
                 html += `<div style="display:flex;align-items:center;gap:0.5rem;padding:0.375rem 0.5rem;background:hsl(var(--muted));border-radius:var(--radius);font-size:0.8125rem;">
                     <span class="badge ${statusDot}" style="flex-shrink:0;"><span class="badge-dot"></span>${statusLabel}</span>
                     <code style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${k.key}">${maskKey(k.key)}</code>
                     ${k.note ? `<span style="color:hsl(var(--muted-foreground));max-width:6rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${k.note}">${k.note}</span>` : ''}
-                    <span style="color:hsl(var(--muted-foreground));font-size:0.75rem;white-space:nowrap;">${k.usage_count}次</span>
+                    ${isPending ? '' : `<span style="color:hsl(var(--muted-foreground));font-size:0.75rem;white-space:nowrap;">${k.usage_count}次</span>`}
                     <div style="display:flex;gap:0.25rem;flex-shrink:0;">
-                        <button class="btn btn-sm btn-ghost" data-tip="${k.enabled ? '禁用' : '启用'}" onclick="toggleChannelKey('${k.key}', ${k.enabled})">${k.enabled ? ICO.toggleOn : ICO.toggleOff}</button>
-                        <button class="btn btn-sm btn-ghost" data-tip="${k.is_active ? '取消固定' : '固定使用'}" style="${k.is_pinned ? 'color:hsl(38 92% 45%)' : ''}" onclick="${k.is_active ? 'unpinChannelKey()' : `pinChannelKey('${k.key}')`}">${ICO.pin}</button>
-                        <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeChannelKey('${k.key}')">${ICO.trash}</button>
+                        ${isPending
+                            ? `<button class="btn btn-sm btn-ghost" data-tip="移除" style="color:hsl(var(--destructive))" onclick="removePendingKey('${k.key}')">${ICO.trash}</button>`
+                            : `<button class="btn btn-sm btn-ghost" data-tip="${k.enabled ? '禁用' : '启用'}" onclick="toggleChannelKey('${k.key}', ${k.enabled})">${k.enabled ? ICO.toggleOn : ICO.toggleOff}</button>
+                             <button class="btn btn-sm btn-ghost" data-tip="${k.is_active ? '取消固定' : '固定使用'}" style="${k.is_pinned ? 'color:hsl(38 92% 45%)' : ''}" onclick="${k.is_active ? 'unpinChannelKey()' : `pinChannelKey('${k.key}')`}">${ICO.pin}</button>
+                             <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeChannelKey('${k.key}')">${ICO.trash}</button>`
+                        }
                     </div>
                 </div>`;
             }
@@ -286,12 +292,30 @@
             el.innerHTML = html;
         }
 
+        function removePendingKey(key) {
+            pendingKeys = pendingKeys.filter(pk => pk.key !== key);
+            renderChannelKeysList([]);
+        }
+
         async function addChannelKey() {
             const editId = document.getElementById('chEditId').value;
             const key = document.getElementById('newChannelKey').value.trim();
             const note = document.getElementById('newChannelKeyNote').value.trim();
             if (!key) { document.getElementById('newChannelKey').focus(); return; }
-            if (!editId) { showToast('请先保存渠道', true); return; }
+            if (!editId) {
+                // Channel not saved yet — store locally
+                if (pendingKeys.some(pk => pk.key === key)) { showToast('Key 已存在', true); return; }
+                pendingKeys.push({key, note});
+                document.getElementById('newChannelKey').value = '';
+                document.getElementById('newChannelKeyNote').value = '';
+                // Auto-fill chApiKey so fetchAllowedModels can use it
+                if (!document.getElementById('chApiKey').value) {
+                    document.getElementById('chApiKey').value = key;
+                }
+                renderChannelKeysList([]);
+                showToast('Key 已添加（保存渠道后生效）');
+                return;
+            }
             try {
                 const res = await fetch(API_BASE + '/keys', {
                     method: 'POST', headers: {'Content-Type':'application/json'},
@@ -353,9 +377,14 @@
             document.getElementById('chApiKey').value = '';
             document.getElementById('chEditId').value = '';
             document.getElementById('chEditAllowedModelsSaved').value = '';
-            document.getElementById('channelKeySection').style.display = 'none';
+            document.getElementById('channelKeySection').style.display = '';
+            pendingKeys = [];
+            renderChannelKeysList([]);
             populateAllowedModelsGrid([], []);
             document.querySelector('#addChannelModal .modal-title').textContent = '添加渠道';
+            // Reset submit button text
+            const submitBtn = document.querySelector('#addChannelModal .btn-primary');
+            if (submitBtn) submitBtn.textContent = '添加';
             document.getElementById('addChannelModal').classList.add('open');
             channelKeysEditing = false;
             setTimeout(() => document.getElementById('chName').focus(), 100);
@@ -392,15 +421,20 @@
         function closeAddChannelModal() {
             document.getElementById('addChannelModal').classList.remove('open');
             channelKeysEditing = false;
+            pendingKeys = [];
         }
 
         async function fetchAllowedModels() {
-            const key = document.getElementById('chApiKey').value.trim();
+            let key = document.getElementById('chApiKey').value.trim();
+            // Fall back to first pending key if no server-side key available
+            if (!key && pendingKeys.length > 0) {
+                key = pendingKeys[0].key;
+            }
             const baseURL = document.getElementById('chBaseURL').value.trim();
             const editId = document.getElementById('chEditId').value;
             const channelType = document.getElementById('chChannelType').value;
             const btn = document.getElementById('chRefreshModelsBtn');
-            if (!key) { document.getElementById('chApiKey').focus(); showToast('请先输入 Key', true); return; }
+            if (!key) { showToast('请先添加 API Key', true); return; }
             if (!baseURL) { document.getElementById('chBaseURL').focus(); showToast('请先输入 Base URL', true); return; }
             const grid = document.getElementById('allowedModelsGrid');
             grid.innerHTML = '<div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));padding:0.5rem;"><span class="spinner" style="width:1rem;height:1rem;display:inline-block;vertical-align:middle;margin-right:0.5rem;"></span>加载中…</div>';
@@ -449,9 +483,42 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || '渠道保存失败');
-                closeAddChannelModal();
-                await loadChannels();
-                showToast(editId ? '渠道已更新' : '渠道已添加');
+                if (editId) {
+                    // Editing existing channel
+                    closeAddChannelModal();
+                    await loadChannels();
+                    showToast('渠道已更新');
+                } else {
+                    // Adding new channel — switch to edit mode and submit pending keys
+                    const newId = data.id;
+                    document.getElementById('chEditId').value = newId;
+                    document.querySelector('#addChannelModal .modal-title').textContent = '编辑渠道';
+                    const submitBtn = document.querySelector('#addChannelModal .btn-primary');
+                    if (submitBtn) submitBtn.textContent = '保存';
+                    channelKeysEditing = true;
+
+                    // Submit any keys that were entered before saving
+                    let keysAdded = 0;
+                    for (const pk of pendingKeys) {
+                        try {
+                            await fetch(API_BASE + '/keys', {
+                                method: 'POST', headers: {'Content-Type':'application/json'},
+                                body: JSON.stringify({action:'add', key: pk.key, note: pk.note, channel_id: newId, default_model: ''})
+                            });
+                            keysAdded++;
+                        } catch (e) { console.error('add key:', e); }
+                    }
+                    pendingKeys = [];
+
+                    await loadChannelKeys();
+                    await loadChannels();
+                    if (keysAdded > 0) {
+                        showToast(`渠道已添加，${keysAdded} 个 Key 已保存`);
+                        closeAddChannelModal();
+                    } else {
+                        showToast('渠道已添加，现在可以添加 API Key');
+                    }
+                }
             } catch (e) { alert('操作失败: ' + (e.message || e)); }
         }
 

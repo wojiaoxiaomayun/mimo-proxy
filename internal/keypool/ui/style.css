@@ -269,6 +269,7 @@ tr:hover td { background: hsl(var(--muted) / 0.5); }
 /* ===== Loading / Spinner ===== */
 .loading { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 2rem 0; color: hsl(var(--muted-foreground)); font-size: 0.875rem; }
 .spinner { width: 1.75rem; height: 1.75rem; border: 2.5px solid hsl(var(--border)); border-top-color: hsl(var(--foreground)); border-radius: 50%; animation: spin 0.7s linear infinite; }
+.btn .spinner { width: 0.875rem; height: 0.875rem; border-width: 2px; display: inline-block; vertical-align: middle; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ===== Result Rows ===== */

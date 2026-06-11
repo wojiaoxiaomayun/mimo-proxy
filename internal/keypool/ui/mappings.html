@@ -121,6 +121,19 @@
         </div>
     </div>
 
+    <!-- Test Result Modal -->
+    <div class="modal-overlay" id="testResultModal">
+        <div class="modal" style="max-width:28rem;" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title" id="testResultTitle">测试结果</div>
+                <button class="modal-close" onclick="document.getElementById('testResultModal').classList.remove('open')" aria-label="关闭">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="testResultBody"></div>
+        </div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script src="/ui/common.js"></script>
@@ -166,6 +179,7 @@
                     <td style="color:hsl(var(--muted-foreground));font-size:0.8125rem;">${m.note || '-'}</td>
                     <td>${statusBadge}</td>
                     <td class="td-actions"><div class="btn-group">
+                        <button class="btn btn-sm btn-ghost" data-tip="测试" onclick="testMapping(${m.id}, this)" id="testBtn-${m.id}">${ICO.play}</button>
                         <button class="btn btn-sm btn-ghost" data-tip="编辑" onclick='openEditMappingModal(${JSON.stringify(m).replace(/'/g,"&#39;")})'>${ICO.pencil}</button>
                         <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeMapping(${m.id})">${ICO.trash}</button>
                     </div></td>
@@ -328,9 +342,93 @@
             showToast('映射已删除');
         }
 
+        const ICON_SUCCESS = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24"><g fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11l3 3L22 4" stroke="#16a34a" stroke-width="2.5"/></g></svg>';
+        const ICON_ERROR = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24"><g fill="none" stroke="#ef4444" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="m15 9l-6 6m0-6l6 6" stroke="#dc2626" stroke-width="2.5"/></g></svg>';
+        const ICON_WARN = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24"><path fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="m21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4m0 4h.01"/></svg>';
+
+        function showTestResult(title, variant, latency, detail) {
+            document.getElementById('testResultTitle').textContent = title;
+            const iconMap = { success: ICON_SUCCESS, error: ICON_ERROR, warn: ICON_WARN };
+            const colorMap = { success: 'hsl(142 71% 45%)', error: 'hsl(0 84% 60%)', warn: 'hsl(38 92% 50%)' };
+            const bgMap = { success: 'hsl(142 71% 45% / 0.08)', error: 'hsl(0 84% 60% / 0.08)', warn: 'hsl(38 92% 50% / 0.08)' };
+
+            const icon = iconMap[variant] || ICON_WARN;
+            const accentColor = colorMap[variant] || colorMap.warn;
+            const bgColor = bgMap[variant] || bgMap.warn;
+
+            const iconHTML = `<div style="display:flex;justify-content:center;margin-bottom:1rem;">
+                <div style="background:${bgColor};border-radius:50%;width:5rem;height:5rem;display:flex;align-items:center;justify-content:center;">
+                    ${icon}
+                </div>
+            </div>`;
+
+            const latencyHTML = latency != null
+                ? `<div style="text-align:center;margin-bottom:1rem;">
+                    <span style="display:inline-flex;align-items:center;gap:0.375rem;padding:0.25rem 0.75rem;border-radius:9999px;font-size:0.8125rem;font-weight:600;color:${accentColor};background:${bgColor};">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        ${latency}ms
+                    </span>
+                </div>` : '';
+
+            document.getElementById('testResultBody').innerHTML =
+                iconHTML + latencyHTML +
+                (detail ? `<div style="background:hsl(var(--muted) / 0.4);border-radius:0.5rem;padding:0.75rem;margin-bottom:1rem;">${detail}</div>` : '') +
+                '<div style="text-align:right;"><button class="btn btn-primary" style="min-width:5rem;" onclick="document.getElementById(\'testResultModal\').classList.remove(\'open\')">关闭</button></div>';
+            document.getElementById('testResultModal').classList.add('open');
+        }
+
+        async function testMapping(id, btn) {
+            if (!btn) btn = document.getElementById('testBtn-' + id);
+            if (!btn) return;
+            const origHTML = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>';
+            try {
+                const res = await fetch(API_BASE + '/test-mapping', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({id})
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    let detail = '';
+                    if (data.data) {
+                        const model = data.data.model || '-';
+                        const usage = data.data.usage || {};
+                        detail += `<div class="result-row"><span>目标模型</span><span style="font-family:monospace;">${model}</span></div>`;
+                        if (usage.prompt_tokens != null) {
+                            detail += `<div class="result-row"><span>Prompt Tokens</span><span>${usage.prompt_tokens}</span></div>`;
+                        }
+                        if (usage.completion_tokens != null) {
+                            detail += `<div class="result-row"><span>Completion Tokens</span><span>${usage.completion_tokens}</span></div>`;
+                        }
+                        if (data.data.choices && data.data.choices[0]) {
+                            const msg = data.data.choices[0].message?.content || '';
+                            if (msg) {
+                                detail += `<div class="result-row"><span>回复</span><span style="font-family:monospace;font-size:0.8125rem;max-width:14rem;word-break:break-all;">${msg}</span></div>`;
+                            }
+                        }
+                    }
+                    showTestResult('测试成功', 'success', data.latency, detail);
+                } else {
+                    const errBody = data.error_body || {};
+                    const errMsg = errBody.error?.message || errBody.error || JSON.stringify(errBody, null, 2);
+                    const detail = `<div class="result-row"><span>状态码</span><span style="color:hsl(0 84% 60%);font-weight:600;">${data.code}</span></div>
+                        <div class="result-row"><span>错误</span><span style="font-family:monospace;font-size:0.8125rem;max-width:14rem;word-break:break-all;color:hsl(0 84% 60%);">${errMsg}</span></div>`;
+                    showTestResult('测试失败', 'error', data.latency, detail);
+                }
+            } catch (e) {
+                const detail = `<div class="result-row"><span>错误</span><span style="font-family:monospace;font-size:0.8125rem;color:hsl(0 84% 60%);">${e.message || e}</span></div>`;
+                showTestResult('请求异常', 'warn', null, detail);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = origHTML;
+            }
+        }
+
         /* ========== Init ========== */
         initModalClose('mappingModal');
         initModalClose('keyInputModal');
+        initModalClose('testResultModal');
         (async () => {
             await loadChannels();
             await loadMappings();
