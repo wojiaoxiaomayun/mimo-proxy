@@ -201,13 +201,25 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save the original model name before any mapping/replacement (for logging).
+	originalModel := extractModel(body)
+
 	// Check model mapping: if the request model is a mapping alias, swap model and channel.
-	if mappedChannelID, mappedModel, ok := h.pool.ResolveModelMapping(extractModel(body)); ok && mappedModel != "" {
+	modelMapped := false
+	mappedModelName := ""
+	if mappedChannelID, mappedModel, ok := h.pool.ResolveModelMapping(originalModel); ok && mappedModel != "" {
 		if mc, merr := h.pool.GetChannelByID(mappedChannelID); merr == nil && mc.Enabled {
+			mappedModelName = mappedModel
 			body = replaceModel(body, mappedModel)
 			channel = mc
+			modelMapped = true
 		}
+	} else if mm := h.pool.GetModelMappingByName(originalModel); mm != nil && !mm.Enabled {
+		// Model name matches a disabled mapping — return error directly.
+		http.Error(w, fmt.Sprintf(`{"error":{"message":"Model mapping '%s' is disabled","type":"invalid_request_error","code":"mapping_disabled"}}`, originalModel), http.StatusBadRequest)
+		return
 	}
+	log.Printf("[chat] originalModel=%s mappedModel=%s channel=%s(%d) modelMapped=%v", originalModel, mappedModelName, channel.Name, channel.ID, modelMapped)
 
 	key, defaultModel, err := h.pool.GetKey(channel.ID)
 	if err != nil {
@@ -216,8 +228,11 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get or refresh model cache (1h TTL). Fetches from upstream on miss/expiry.
-	models := h.getOrFetchModels(channel, key)
-	body = h.swapModelIfNeeded(body, models, defaultModel)
+	// Skip swapModelIfNeeded when a model mapping was applied to preserve the mapped target model.
+	if !modelMapped {
+		models := h.getOrFetchModels(channel, key)
+		body = h.swapModelIfNeeded(body, models, defaultModel)
+	}
 
 	req, err := http.NewRequest(http.MethodPost, chatCompletionsURLFromBase(channel.BaseURL), bytes.NewReader(body))
 	if err != nil {
@@ -267,7 +282,8 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 
 	proxyKey := extractProxyKey(r)
-	model := extractModel(body)
+	// Use the original model name (before mapping) for logging.
+	model := originalModel
 
 	// Check if this is a streaming response.
 	isStreaming := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
@@ -984,19 +1000,14 @@ func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channel
 	mappedOnly := make(map[string]bool)    // all mapping names for this type
 	if mappings, merr := h.pool.GetAllModelMappings(); merr == nil {
 		for _, m := range mappings {
-			if !m.Enabled {
+			if !m.Enabled || m.ChannelType != channelType {
 				continue
 			}
-			// Check if any target belongs to this channel type
-			hasType := false
+			mappedOnly[m.Name] = true
 			for _, t := range m.Targets {
-				if t.Enabled && t.ChannelType == channelType {
-					hasType = true
+				if t.Enabled {
 					mappedNames[t.TargetModel] = m.Name
 				}
-			}
-			if hasType {
-				mappedOnly[m.Name] = true
 			}
 		}
 	}
@@ -1200,6 +1211,8 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 				targets = []ModelMappingTarget{{ChannelID: req.ChannelID, TargetModel: req.TargetModel}}
 			}
 			err = h.pool.UpdateModelMappingGroup(req.ID, req.Name, req.ChannelType, req.Strategy, req.Note, targets)
+		case "toggle":
+			err = h.pool.ToggleModelMapping(req.ID)
 		case "remove":
 			err = h.pool.RemoveModelMapping(req.ID)
 		case "get":
@@ -1681,13 +1694,25 @@ func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save the original model name before any mapping/replacement (for logging).
+	originalModel := extractModel(body)
+
 	// Check model mapping: if the request model is a mapping alias, swap model and channel.
-	if mappedChannelID, mappedModel, ok := h.pool.ResolveModelMapping(extractModel(body)); ok && mappedModel != "" {
+	modelMapped := false
+	mappedModelName := ""
+	if mappedChannelID, mappedModel, ok := h.pool.ResolveModelMapping(originalModel); ok && mappedModel != "" {
 		if mc, merr := h.pool.GetChannelByID(mappedChannelID); merr == nil && mc.Enabled {
+			mappedModelName = mappedModel
 			body = replaceModel(body, mappedModel)
 			channel = mc
+			modelMapped = true
 		}
+	} else if mm := h.pool.GetModelMappingByName(originalModel); mm != nil && !mm.Enabled {
+		// Model name matches a disabled mapping — return error directly.
+		http.Error(w, fmt.Sprintf(`{"type":"error","error":{"type":"invalid_request_error","message":"Model mapping '%s' is disabled"}}`, originalModel), http.StatusBadRequest)
+		return
 	}
+	log.Printf("[messages] originalModel=%s mappedModel=%s channel=%s(%d) modelMapped=%v", originalModel, mappedModelName, channel.Name, channel.ID, modelMapped)
 
 	key, defaultModel, err := h.pool.GetKey(channel.ID)
 	if err != nil {
@@ -1696,12 +1721,15 @@ func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Swap model if needed (reuse same logic).
-	var models []string
-	models = h.getCachedModels(channel.ID)
-	if models == nil {
-		models = h.refreshModels(channel.ID, modelsURLFromBase(channel.BaseURL), key)
+	// Skip swapModelIfNeeded when a model mapping was applied to preserve the mapped target model.
+	if !modelMapped {
+		var models []string
+		models = h.getCachedModels(channel.ID)
+		if models == nil {
+			models = h.refreshModels(channel.ID, modelsURLFromBase(channel.BaseURL), key)
+		}
+		body = h.swapModelIfNeeded(body, models, defaultModel)
 	}
-	body = h.swapModelIfNeeded(body, models, defaultModel)
 
 	upstreamURL := messagesURLFromBase(channel.BaseURL)
 	req, err := http.NewRequest(http.MethodPost, upstreamURL, bytes.NewReader(body))
@@ -1752,7 +1780,8 @@ func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 
 	proxyKey := extractProxyKey(r)
-	model := extractModel(body)
+	// Use the original model name (before mapping) for logging.
+	model := originalModel
 
 	isStreaming := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 

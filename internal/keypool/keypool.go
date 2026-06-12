@@ -798,14 +798,19 @@ func (p *KeyPool) ImportBackup(backup *BackupData) (*ImportSummary, error) {
 		if strategy == "" {
 			strategy = "round-robin"
 		}
+		channelType := mm.ChannelType
+		if channelType == "" {
+			channelType = "openai"
+		}
 		res, err := tx.Exec(`
-			INSERT INTO model_mappings (name, strategy, note, enabled, created_at)
-			VALUES (?, ?, ?, ?, ?)
+			INSERT INTO model_mappings (name, channel_type, strategy, note, enabled, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
+				channel_type = excluded.channel_type,
 				strategy = excluded.strategy,
 				note = excluded.note,
 				enabled = excluded.enabled
-		`, name, strategy, mm.Note, boolToInt(mm.Enabled), defaultCreatedAt(mm.CreatedAt))
+		`, name, channelType, strategy, mm.Note, boolToInt(mm.Enabled), defaultCreatedAt(mm.CreatedAt))
 		if err != nil {
 			return nil, err
 		}
@@ -1135,6 +1140,31 @@ func (p *KeyPool) GetModelMappingByID(id int) (*ModelMapping, error) {
 	}
 	m.Targets, _ = p.queryTargetsForMapping(m.ID)
 	return &m, nil
+}
+
+// GetModelMappingByName looks up a mapping by name (regardless of enabled state).
+// Returns nil if not found.
+func (p *KeyPool) GetModelMappingByName(modelName string) *ModelMapping {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var m ModelMapping
+	err := p.db.QueryRow(`
+		SELECT m.id, m.name, COALESCE(m.channel_type,'openai'), COALESCE(m.strategy,'round-robin'), COALESCE(m.note,''), m.enabled, m.created_at
+		FROM model_mappings m WHERE m.name = ?
+	`, modelName).Scan(&m.ID, &m.Name, &m.ChannelType, &m.Strategy, &m.Note, &m.Enabled, &m.CreatedAt)
+	if err != nil {
+		return nil
+	}
+	m.Targets, _ = p.queryTargetsForMapping(m.ID)
+	return &m
+}
+
+// ToggleModelMapping toggles the enabled state of a model mapping.
+func (p *KeyPool) ToggleModelMapping(id int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE model_mappings SET enabled = NOT enabled WHERE id = ?`, id)
+	return err
 }
 
 func (p *KeyPool) AddModelMappingGroup(name, channelType, strategy, note string, targets []ModelMappingTarget) error {

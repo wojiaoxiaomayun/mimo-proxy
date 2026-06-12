@@ -52,11 +52,12 @@ func TestImportBackupRestoresConfig(t *testing.T) {
 		},
 		ModelMappings: []ModelMapping{
 			{
-				ID:       1,
-				Name:     "test-model",
-				Strategy: "round-robin",
-				Note:     "test mapping",
-				Enabled:  true,
+				ID:          1,
+				Name:        "test-model",
+				ChannelType: "openai",
+				Strategy:    "round-robin",
+				Note:        "test mapping",
+				Enabled:     true,
 				Targets: []ModelMappingTarget{
 					{ChannelID: 42, TargetModel: "real-model", Position: 0, Enabled: true},
 				},
@@ -124,6 +125,9 @@ func TestImportBackupRestoresConfig(t *testing.T) {
 	}
 	if importedMapping.Strategy != "round-robin" {
 		t.Fatalf("imported mapping strategy = %q", importedMapping.Strategy)
+	}
+	if importedMapping.ChannelType != "openai" {
+		t.Fatalf("imported mapping channel_type = %q", importedMapping.ChannelType)
 	}
 	if len(importedMapping.Targets) == 0 {
 		t.Fatal("imported mapping has no targets")

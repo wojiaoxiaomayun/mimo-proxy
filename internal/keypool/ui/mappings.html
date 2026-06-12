@@ -204,6 +204,7 @@
                     <td style="color:hsl(var(--muted-foreground));font-size:0.8125rem;">${m.note || '-'}</td>
                     <td>${statusBadge}</td>
                     <td class="td-actions"><div class="btn-group">
+                        <button class="btn btn-sm btn-ghost" data-tip="${m.enabled ? '禁用' : '启用'}" onclick="toggleMapping(${m.id})" style="${m.enabled ? '' : 'color:hsl(var(--muted-foreground));'}">${m.enabled ? ICO.toggleOn : ICO.toggleOff}</button>
                         <button class="btn btn-sm btn-ghost" data-tip="测试" onclick="testMapping(${m.id}, this)" id="testBtn-${m.id}">${ICO.play}</button>
                         <button class="btn btn-sm btn-ghost" data-tip="编辑" onclick='openEditMappingModal(${JSON.stringify(m).replace(/'/g,"&#39;")})'>${ICO.pencil}</button>
                         <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeMapping(${m.id})">${ICO.trash}</button>
@@ -457,7 +458,8 @@
                 
                 targets.push({
                     channel_id: channelID,
-                    target_model: model
+                    target_model: model,
+                    enabled: true
                 });
             }
             
@@ -491,6 +493,22 @@
                 closeMappingModal();
                 await loadMappings();
                 showToast(editId ? '映射已更新' : '映射已添加');
+            } catch (e) {
+                alert('操作失败: ' + (e.message || e));
+            }
+        }
+
+        async function toggleMapping(id) {
+            try {
+                const res = await fetch(API_BASE + '/model-mappings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'toggle', id })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || '操作失败');
+                await loadMappings();
+                showToast('状态已切换');
             } catch (e) {
                 alert('操作失败: ' + (e.message || e));
             }
