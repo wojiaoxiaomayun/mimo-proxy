@@ -21,6 +21,7 @@ const ICO = {
     pencil:     '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497zM15 5l4 4"/></svg>',
     star:       '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679c.19.383.595.634 1.035.674l5.098.521a.53.53 0 0 1 .304.932l-3.834 3.33a1.31 1.31 0 0 0-.418 1.264l1.06 4.966a.53.53 0 0 1-.793.573L12.44 17.2a1.31 1.31 0 0 0-1.324 0L5.686 20.55a.53.53 0 0 1-.793-.573l1.06-4.966a1.31 1.31 0 0 0-.418-1.264l-3.834-3.33a.53.53 0 0 1 .304-.932l5.098-.521a1.31 1.31 0 0 0 1.035-.674z"/></svg>',
     trash:      '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11v6m4-6v6m5-11v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+    more:       '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>',
 };
 
 /* ========== Helpers ========== */

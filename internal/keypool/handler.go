@@ -94,6 +94,7 @@ func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	mux.HandleFunc("/c/{channel}/v1/models", h.V1Models)
 	mux.HandleFunc("/c/{channel}/v1/messages", h.Messages)
 	mux.HandleFunc("/c/{channel}/v1/messages/count_tokens", h.MessagesCountTokens)
+	mux.HandleFunc("/api/channels/{id}/keys", h.ChannelAPIKeys)
 	mux.HandleFunc("/stats", h.Stats)
 	mux.HandleFunc("/keys", h.Keys)
 	mux.HandleFunc("/test-key", h.TestKey)
@@ -479,6 +480,53 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// ChannelAPIKeys handles POST /api/channels/{id}/keys for external programs to add API keys.
+func (h *Handler) ChannelAPIKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Only POST method is allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	var channelID int
+	if _, err := fmt.Sscanf(idStr, "%d", &channelID); err != nil || channelID <= 0 {
+		http.Error(w, `{"error":"Invalid channel ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Verify channel exists.
+	if _, err := h.pool.GetChannelByID(channelID); err != nil {
+		http.Error(w, `{"error":"Channel not found"}`, http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Key          string `json:"key"`
+		Note         string `json:"note"`
+		DefaultModel string `json:"default_model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Invalid JSON body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Key == "" {
+		http.Error(w, `{"error":"key is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := h.pool.Add(req.Key, req.Note, channelID, req.DefaultModel); err != nil {
+		http.Error(w, `{"error":"`+strings.ReplaceAll(err.Error(), `"`, `\"`)+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "ok",
+		"channel_id": channelID,
+		"key":        req.Key,
+	})
 }
 
 func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
