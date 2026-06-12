@@ -52,13 +52,15 @@ func TestImportBackupRestoresConfig(t *testing.T) {
 		},
 		ModelMappings: []ModelMapping{
 			{
-				ID:          1,
-				Name:        "test-model",
-				ChannelID:   42,
-				TargetModel: "real-model",
-				Note:        "test mapping",
-				Enabled:     true,
-				CreatedAt:   "2026-01-01 00:00:03",
+				ID:       1,
+				Name:     "test-model",
+				Strategy: "round-robin",
+				Note:     "test mapping",
+				Enabled:  true,
+				Targets: []ModelMappingTarget{
+					{ChannelID: 42, TargetModel: "real-model", Position: 0, Enabled: true},
+				},
+				CreatedAt: "2026-01-01 00:00:03",
 			},
 		},
 		Settings: map[string]string{"retention": "short"},
@@ -120,8 +122,14 @@ func TestImportBackupRestoresConfig(t *testing.T) {
 	if importedMapping == nil {
 		t.Fatal("imported model mapping was not exported")
 	}
-	if importedMapping.TargetModel != "real-model" || importedMapping.ChannelID != importedChannel.ID {
-		t.Fatalf("imported mapping = %+v", *importedMapping)
+	if importedMapping.Strategy != "round-robin" {
+		t.Fatalf("imported mapping strategy = %q", importedMapping.Strategy)
+	}
+	if len(importedMapping.Targets) == 0 {
+		t.Fatal("imported mapping has no targets")
+	}
+	if importedMapping.Targets[0].TargetModel != "real-model" || importedMapping.Targets[0].ChannelID != importedChannel.ID {
+		t.Fatalf("imported mapping target = %+v", importedMapping.Targets[0])
 	}
 	if got := pool.GetSetting("retention", ""); got != "short" {
 		t.Fatalf("GetSetting(retention) = %q", got)

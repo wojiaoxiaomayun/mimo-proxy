@@ -40,7 +40,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <div>
                     <h1>模型映射</h1>
-                    <p>将自定义模型名映射到指定渠道的模型，请求时自动转发</p>
+                    <p>将自定义模型名映射到多个渠道的目标模型，支持轮询和故障转移策略</p>
                 </div>
                 <button class="btn btn-primary btn-sm" onclick="openAddMappingModal()">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
@@ -55,7 +55,7 @@
 
     <!-- Add/Edit Mapping Modal -->
     <div class="modal-overlay" id="mappingModal">
-        <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal" style="max-width:42rem;" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <div class="modal-title" id="mappingModalTitle">添加映射</div>
                 <button class="modal-close" onclick="closeMappingModal()" aria-label="关闭">
@@ -70,21 +70,44 @@
                     <div class="field-hint">客户端请求此模型名时，自动转发到下方渠道的目标模型</div>
                 </div>
                 <div class="field-group" style="margin-top:1rem;">
-                    <label>目标渠道 <span style="color:hsl(0 84.2% 60.2%)">*</span></label>
-                    <select id="mappingChannel" style="width:100%;" onchange="onMappingChannelChange()"></select>
-                    <div class="field-hint" id="mappingChannelHint">选择渠道后，只能选择该渠道类型对应的模型</div>
+                    <label>API 类型</label>
+                    <div style="display:flex;gap:0.5rem;">
+                        <label style="display:flex;align-items:center;gap:0.375rem;padding:0.5rem 0.75rem;border:2px solid hsl(var(--border));border-radius:0.5rem;cursor:pointer;flex:1;justify-content:center;" class="type-option active" data-val="openai" onclick="selectChannelType('openai')">
+                            <input type="radio" name="mappingChannelType" value="openai" checked style="display:none;">
+                            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsl(217 91% 60%);"></span>
+                            OpenAI
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.375rem;padding:0.5rem 0.75rem;border:2px solid hsl(var(--border));border-radius:0.5rem;cursor:pointer;flex:1;justify-content:center;" class="type-option" data-val="anthropic" onclick="selectChannelType('anthropic')">
+                            <input type="radio" name="mappingChannelType" value="anthropic" style="display:none;">
+                            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:hsl(262 84.2% 60.2%);"></span>
+                            Anthropic
+                        </label>
+                    </div>
+                    <div class="field-hint" id="channelTypeHint">选择后，目标渠道列表将只显示对应类型的渠道</div>
                 </div>
                 <div class="field-group" style="margin-top:1rem;">
-                    <label>目标模型 <span style="color:hsl(0 84.2% 60.2%)">*</span></label>
+                    <label>调度策略</label>
                     <div style="display:flex;gap:0.5rem;">
-                        <select id="mappingModel" style="flex:1;" onchange="onMappingModelChange()">
-                            <option value="">请先选择渠道并加载模型</option>
-                        </select>
-                        <button class="btn btn-outline" id="mappingRefreshBtn" onclick="fetchMappingModels()" data-tip="刷新模型列表">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9a9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5m5 4a9 9 0 0 1-9 9a9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></g></svg>
-                        </button>
+                        <label style="display:flex;align-items:center;gap:0.375rem;padding:0.5rem 0.75rem;border:1px solid hsl(var(--border));border-radius:0.5rem;cursor:pointer;flex:1;justify-content:center;" class="strategy-option active" data-val="round-robin" onclick="selectStrategy('round-robin')">
+                            <input type="radio" name="mappingStrategy" value="round-robin" checked style="display:none;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9a9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></g></svg>
+                            轮询
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.375rem;padding:0.5rem 0.75rem;border:1px solid hsl(var(--border));border-radius:0.5rem;cursor:pointer;flex:1;justify-content:center;" class="strategy-option" data-val="failover" onclick="selectStrategy('failover')">
+                            <input type="radio" name="mappingStrategy" value="failover" style="display:none;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></g></svg>
+                            故障转移
+                        </label>
                     </div>
-                    <div class="field-hint" id="mappingModelHint">需要输入渠道的 API Key 来获取模型列表</div>
+                    <div class="field-hint" id="strategyHint">轮询：每次请求依次选择下一个目标；故障转移：始终使用第一个目标</div>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
+                    <label>目标列表 <span style="color:hsl(0 84.2% 60.2%)">*</span></label>
+                    <div id="targetsContainer" style="display:flex;flex-direction:column;gap:0.75rem;"></div>
+                    <button class="btn btn-outline btn-sm" style="margin-top:0.5rem;" onclick="addTargetRow()">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7v14"/></svg>
+                        添加目标
+                    </button>
                 </div>
                 <div class="field-group" style="margin-top:1rem;">
                     <label>备注</label>
@@ -98,28 +121,6 @@
         </div>
     </div>
 
-    <!-- Key Input Modal for fetching models -->
-    <div class="modal-overlay" id="keyInputModal">
-        <div class="modal" style="max-width:24rem;" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <div class="modal-title">输入 API Key</div>
-                <button class="modal-close" onclick="document.getElementById('keyInputModal').classList.remove('open')" aria-label="关闭">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="field-group">
-                    <label>API Key</label>
-                    <input type="text" id="keyInputValue" placeholder="输入该渠道的 API Key" style="width:100%;" onkeydown="if(event.key==='Enter')confirmKeyInput()">
-                    <div class="field-hint">用于从上游获取可用模型列表，不会保存</div>
-                </div>
-                <div style="margin-top:1rem;display:flex;gap:0.5rem;">
-                    <button class="btn btn-outline" onclick="document.getElementById('keyInputModal').classList.remove('open')" style="flex:1;">取消</button>
-                    <button class="btn btn-primary" onclick="confirmKeyInput()" style="flex:1;">确定</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- Test Result Modal -->
     <div class="modal-overlay" id="testResultModal">
@@ -139,7 +140,6 @@
     <script src="/ui/common.js"></script>
     <script>
         let allChannels = [];
-        let channelKeys = {}; // channelID → active key (cached)
 
         async function loadChannels() {
             try {
@@ -160,22 +160,47 @@
         function renderMappings(mappings) {
             const grid = document.getElementById('mappingsGrid');
             if (!mappings || mappings.length === 0) {
-                grid.innerHTML = '<div class="empty-state"><p>暂无模型映射</p><p class="empty-hint">添加映射将自定义模型名指向指定渠道的模型</p></div>';
+                grid.innerHTML = '<div class="empty-state"><p>暂无模型映射</p><p class="empty-hint">添加映射将自定义模型名指向多个渠道的目标模型，支持轮询和故障转移策略</p></div>';
                 return;
             }
             let rows = '';
             for (const m of mappings) {
+                const strategyLabel = m.strategy === 'failover'
+                    ? '<span class="badge badge-warning">故障转移</span>'
+                    : '<span class="badge badge-success">轮询</span>';
                 const typeLabel = m.channel_type === 'anthropic'
                     ? '<span class="badge" style="background:hsl(262 84.2% 60.2%);color:white;">Anthropic</span>'
-                    : '<span class="badge" style="background:hsl(var(--muted));color:hsl(var(--muted-foreground));">OpenAI</span>';
+                    : '<span class="badge" style="background:hsl(217 91% 60% / 0.12);color:hsl(217 91% 60%);">OpenAI</span>';
+                
                 const statusBadge = m.enabled
                     ? '<span class="badge badge-success"><span class="badge-dot"></span>启用</span>'
                     : '<span class="badge badge-warning"><span class="badge-dot"></span>禁用</span>';
+                
+                // Build targets display
+                let targetsHTML = '<div style="display:flex;flex-direction:column;gap:0.25rem;">';
+                if (m.targets && m.targets.length > 0) {
+                    for (const t of m.targets) {
+                        const channel = allChannels.find(c => c.id === t.channel_id);
+                        const channelName = channel ? (channel.name || channel.prefix) : '未知渠道';
+                        const channelType = channel ? channel.channel_type : 'openai';
+                        const typeTag = channelType === 'anthropic'
+                            ? '<span class="badge" style="background:hsl(262 84.2% 60.2%);color:white;font-size:0.6875rem;">Anthropic</span>'
+                            : '<span class="badge" style="background:hsl(217 91% 60% / 0.12);color:hsl(217 91% 60%);font-size:0.6875rem;">OpenAI</span>';
+                        targetsHTML += `<div style="display:flex;align-items:center;gap:0.375rem;font-size:0.8125rem;">
+                            <span style="color:hsl(var(--muted-foreground));">${channelName}</span>
+                            <span style="font-family:monospace;">→ ${t.target_model}</span>
+                        </div>`;
+                    }
+                } else {
+                    targetsHTML += '<span style="color:hsl(var(--muted-foreground));font-size:0.8125rem;">无目标</span>';
+                }
+                targetsHTML += '</div>';
+                
                 rows += `<tr>
                     <td style="font-weight:600;font-family:monospace;">${m.name}</td>
                     <td>${typeLabel}</td>
-                    <td>${m.channel_name || '-'}</td>
-                    <td style="font-family:monospace;font-size:0.8125rem;">${m.target_model}</td>
+                    <td>${strategyLabel}</td>
+                    <td>${targetsHTML}</td>
                     <td style="color:hsl(var(--muted-foreground));font-size:0.8125rem;">${m.note || '-'}</td>
                     <td>${statusBadge}</td>
                     <td class="td-actions"><div class="btn-group">
@@ -186,18 +211,25 @@
                 </tr>`;
             }
             grid.innerHTML = `<div class="table-wrapper"><table><thead><tr>
-                <th>映射名称</th><th>类型</th><th>目标渠道</th><th>目标模型</th><th>备注</th><th>状态</th><th style="text-align:right">操作</th>
+                <th>映射名称</th><th>类型</th><th>策略</th><th>目标列表</th><th>备注</th><th>状态</th><th style="text-align:right">操作</th>
             </tr></thead><tbody>${rows}</tbody></table></div>`;
         }
 
         /* ========== Modal ========== */
 
+        let targetRowCounter = 0;
+
         function openAddMappingModal() {
             document.getElementById('mappingEditId').value = '';
             document.getElementById('mappingName').value = '';
             document.getElementById('mappingNote').value = '';
-            document.getElementById('mappingModel').innerHTML = '<option value="">请先选择渠道并加载模型</option>';
-            populateChannelSelect();
+            document.getElementById('targetsContainer').innerHTML = '';
+            targetRowCounter = 0;
+            
+            selectChannelType('openai');
+            selectStrategy('round-robin');
+            addTargetRow();
+            
             document.getElementById('mappingModalTitle').textContent = '添加映射';
             document.getElementById('mappingModal').classList.add('open');
             setTimeout(() => document.getElementById('mappingName').focus(), 100);
@@ -207,10 +239,20 @@
             document.getElementById('mappingEditId').value = m.id;
             document.getElementById('mappingName').value = m.name || '';
             document.getElementById('mappingNote').value = m.note || '';
-            populateChannelSelect();
-            document.getElementById('mappingChannel').value = m.channel_id;
-            // Show the current target model as an option
-            document.getElementById('mappingModel').innerHTML = `<option value="${m.target_model}" selected>${m.target_model}</option>`;
+            document.getElementById('targetsContainer').innerHTML = '';
+            targetRowCounter = 0;
+            
+            selectChannelType(m.channel_type || 'openai');
+            selectStrategy(m.strategy || 'round-robin');
+            
+            if (m.targets && m.targets.length > 0) {
+                for (const target of m.targets) {
+                    addTargetRow(target);
+                }
+            } else {
+                addTargetRow();
+            }
+            
             document.getElementById('mappingModalTitle').textContent = '编辑映射';
             document.getElementById('mappingModal').classList.add('open');
         }
@@ -219,135 +261,166 @@
             document.getElementById('mappingModal').classList.remove('open');
         }
 
-        function populateChannelSelect() {
-            const sel = document.getElementById('mappingChannel');
-            sel.innerHTML = '<option value="">选择渠道</option>' +
-                allChannels.map(c => {
-                    const typeTag = c.channel_type === 'anthropic' ? ' [Anthropic]' : ' [OpenAI]';
-                    return `<option value="${c.id}">${c.name || c.prefix}${typeTag}</option>`;
-                }).join('');
+        function selectStrategy(strategy) {
+            document.querySelectorAll('.strategy-option').forEach(el => {
+                el.classList.remove('active');
+                if (el.dataset.val === strategy) {
+                    el.classList.add('active');
+                }
+            });
+            document.querySelector(`input[name="mappingStrategy"][value="${strategy}"]`).checked = true;
+            
+            const hint = document.getElementById('strategyHint');
+            if (strategy === 'round-robin') {
+                hint.textContent = '轮询：每次请求依次选择下一个目标，实现负载均衡';
+            } else {
+                hint.textContent = '故障转移：始终使用第一个可用目标，失败时自动切换到下一个';
+            }
         }
 
-        function onMappingChannelChange() {
-            document.getElementById('mappingModel').innerHTML = '<option value="">点击刷新获取模型列表</option>';
-        }
-
-        // When selecting a model, auto-fill the mapping name with
-        // "<model>-<channel-name>". Always overwrites any previous value.
-        function onMappingModelChange() {
-            const model = document.getElementById('mappingModel').value;
-            if (!model) return;
-
-            const channelSel = document.getElementById('mappingChannel');
-            const selectedOption = channelSel.options[channelSel.selectedIndex];
-            if (!selectedOption || !selectedOption.value) return;
-            const channelName = selectedOption.text || '';
-
-            // Strip the type tag like " [OpenAI]" / " [Anthropic]" from the
-            // channel display text so the auto-generated name stays clean.
-            const cleanChannelName = channelName.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
-
-            document.getElementById('mappingName').value =
-                cleanChannelName ? `${model}-${cleanChannelName}` : model;
-        }
-
-        /* ========== Fetch Models ========== */
-
-        let keyInputResolve = null;
-
-        function promptForKey() {
-            return new Promise((resolve) => {
-                keyInputResolve = resolve;
-                document.getElementById('keyInputValue').value = '';
-                document.getElementById('keyInputModal').classList.add('open');
-                setTimeout(() => document.getElementById('keyInputValue').focus(), 100);
+        function selectChannelType(type) {
+            document.querySelectorAll('.type-option').forEach(el => {
+                el.classList.remove('active');
+                if (el.dataset.val === type) {
+                    el.classList.add('active');
+                }
+            });
+            document.querySelector(`input[name="mappingChannelType"][value="${type}"]`).checked = true;
+            // Rebuild channel options in all target rows
+            document.querySelectorAll('#targetsContainer .target-row').forEach(row => {
+                const select = row.querySelector('.target-channel');
+                const currentVal = select.value;
+                select.innerHTML = buildChannelOptions(currentVal);
             });
         }
 
-        function confirmKeyInput() {
-            const key = document.getElementById('keyInputValue').value.trim();
-            document.getElementById('keyInputModal').classList.remove('open');
-            if (keyInputResolve) {
-                keyInputResolve(key);
-                keyInputResolve = null;
+        function getSelectedChannelType() {
+            const el = document.querySelector('input[name="mappingChannelType"]:checked');
+            return el ? el.value : 'openai';
+        }
+
+        function buildChannelOptions(selectedId) {
+            const type = getSelectedChannelType();
+            const filtered = allChannels.filter(c => c.channel_type === type);
+            let html = '<option value="">选择渠道</option>';
+            for (const c of filtered) {
+                const sel = selectedId && c.id === parseInt(selectedId) ? ' selected' : '';
+                html += `<option value="${c.id}"${sel}>${c.name || c.prefix}</option>`;
+            }
+            return html;
+        }
+
+        function addTargetRow(targetData = null) {
+            targetRowCounter++;
+            const rowId = `target-row-${targetRowCounter}`;
+            const container = document.getElementById('targetsContainer');
+            
+            const row = document.createElement('div');
+            row.id = rowId;
+            row.className = 'target-row';
+            
+            const selectedId = targetData ? targetData.channel_id : '';
+            const channelOptions = buildChannelOptions(selectedId);
+            const modelValue = targetData ? targetData.target_model : '';
+            
+            row.innerHTML = `
+                <div style="flex:1;display:flex;flex-direction:column;gap:0.5rem;">
+                    <select class="target-channel" onchange="onTargetChannelChange(this)">
+                        ${channelOptions}
+                    </select>
+                    <div style="display:flex;gap:0.5rem;">
+                        <input type="text" class="target-model" value="${modelValue}" placeholder="目标模型名" style="flex:1;font-family:monospace;">
+                        <button class="btn btn-outline btn-sm" onclick="fetchTargetModels(this)" style="white-space:nowrap;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+                            获取模型
+                        </button>
+                    </div>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="removeTargetRow('${rowId}')" style="color:hsl(var(--destructive));padding:0.375rem;margin-top:0.25rem;" data-tip="删除此目标">
+                    ${ICO.trash}
+                </button>
+            `;
+            
+            container.appendChild(row);
+        }
+
+        function removeTargetRow(rowId) {
+            const row = document.getElementById(rowId);
+            if (row) {
+                row.remove();
             }
         }
 
-        async function fetchMappingModels() {
-            const channelID = document.getElementById('mappingChannel').value;
-            if (!channelID) { showToast('请先选择渠道', true); return; }
+        function onTargetChannelChange(select) {
+            // Clear the model input when channel changes
+            const row = select.closest('.target-row');
+            if (row) {
+                const modelInput = row.querySelector('.target-model');
+                if (modelInput) {
+                    modelInput.value = '';
+                }
+            }
+        }
 
-            // Try to find an active key for this channel
-            let key = channelKeys[channelID];
-            if (!key) {
-                try {
-                    const res = await fetch(API_BASE + '/keys?channel=' + channelID);
-                    const data = await res.json();
-                    const active = (data.keys || []).find(k => k.is_active && k.enabled);
-                    if (active) {
-                        key = active.key;
-                        channelKeys[channelID] = key;
-                    }
-                } catch (e) {}
+        async function fetchTargetModels(btn) {
+            const row = btn.closest('.target-row');
+            if (!row) return;
+            
+            const channelSelect = row.querySelector('.target-channel');
+            const modelInput = row.querySelector('.target-model');
+            const channelID = channelSelect.value;
+            
+            if (!channelID) {
+                showToast('请先选择渠道', true);
+                return;
             }
 
-            if (!key) {
-                key = await promptForKey();
-                if (!key) return;
-                channelKeys[channelID] = key;
+            const channel = allChannels.find(c => c.id === parseInt(channelID));
+            const models = (channel && channel.allowed_models && channel.allowed_models.length > 0) ? channel.allowed_models : [];
+
+            if (models.length === 0) {
+                showToast('该渠道未配置允许模型，请先在渠道设置中添加', true);
+                return;
             }
 
-            const sel = document.getElementById('mappingModel');
-            const btn = document.getElementById('mappingRefreshBtn');
-            const prevModel = sel.value;
-            sel.innerHTML = '<option value="">加载中…</option>';
-            btn.disabled = true;
-            try {
-                const res = await fetch(API_BASE + '/models?channel=' + channelID + '&key=' + encodeURIComponent(key));
-                const data = await res.json();
-                const models = (data.data || []).map(m => m.id);
-                if (models.length === 0) {
-                    // Fallback: use channel's allowed_models
-                    const channel = allChannels.find(c => c.id === parseInt(channelID));
-                    const fallbackModels = (channel && channel.allowed_models && channel.allowed_models.length > 0) ? channel.allowed_models : [];
-                    if (fallbackModels.length > 0) {
-                        let opts = '<option value="">选择模型（来自渠道配置）</option>';
-                        for (const m of fallbackModels) {
-                            const selected = m === prevModel ? ' selected' : '';
-                            opts += `<option value="${m}"${selected}>${m}</option>`;
-                        }
-                        sel.innerHTML = opts;
-                        showToast('使用渠道配置的模型列表', false);
-                    } else {
-                        sel.innerHTML = '<option value="">未获取到模型</option>';
-                    }
-                    return;
-                }
-                let opts = '<option value="">选择模型</option>';
-                for (const m of models) {
-                    const selected = m === prevModel ? ' selected' : '';
-                    opts += `<option value="${m}"${selected}>${m}</option>`;
-                }
-                sel.innerHTML = opts;
-            } catch (e) {
-                // Fallback: use channel's allowed_models on error
-                const channel = allChannels.find(c => c.id === parseInt(channelID));
-                const fallbackModels = (channel && channel.allowed_models && channel.allowed_models.length > 0) ? channel.allowed_models : [];
-                if (fallbackModels.length > 0) {
-                    let opts = '<option value="">选择模型（来自渠道配置）</option>';
-                    for (const m of fallbackModels) {
-                        const selected = m === prevModel ? ' selected' : '';
-                        opts += `<option value="${m}"${selected}>${m}</option>`;
-                    }
-                    sel.innerHTML = opts;
-                    showToast('模型列表获取失败，使用渠道配置的模型列表', false);
-                } else {
-                    sel.innerHTML = '<option value="">获取失败</option>';
-                    showToast('模型列表获取失败', true);
-                }
-            } finally {
-                btn.disabled = false;
+            showModelSelector(modelInput, models);
+        }
+
+        function showModelSelector(inputEl, models) {
+            // Create a simple dropdown selector
+            const currentValue = inputEl.value;
+            const selector = document.createElement('div');
+            selector.className = 'model-selector';
+            
+            let optionsHTML = '';
+            for (const m of models) {
+                const selectedClass = m === currentValue ? ' selected' : '';
+                optionsHTML += `<div class="model-option${selectedClass}" onclick="selectModel(this, '${m.replace(/'/g, "\\'")}')">${m}</div>`;
             }
+            
+            selector.innerHTML = optionsHTML;
+            
+            // Position relative to input
+            const inputParent = inputEl.parentElement;
+            inputParent.style.position = 'relative';
+            inputParent.appendChild(selector);
+            
+            // Close when clicking outside
+            const closeHandler = (e) => {
+                if (!selector.contains(e.target) && e.target !== inputEl) {
+                    selector.remove();
+                    document.removeEventListener('click', closeHandler);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', closeHandler), 10);
+        }
+
+        function selectModel(optionEl, model) {
+            const selector = optionEl.closest('.model-selector');
+            const row = selector.closest('.target-row');
+            const input = row ? row.querySelector('.target-model') : selector.parentElement.querySelector('.target-model');
+            if (input) input.value = model;
+            selector.remove();
         }
 
         /* ========== CRUD ========== */
@@ -355,26 +428,72 @@
         async function submitMapping() {
             const editId = document.getElementById('mappingEditId').value;
             const name = document.getElementById('mappingName').value.trim();
-            const channel_id = parseInt(document.getElementById('mappingChannel').value) || 0;
-            const target_model = document.getElementById('mappingModel').value;
             const note = document.getElementById('mappingNote').value.trim();
-            if (!name) { document.getElementById('mappingName').focus(); showToast('名称不能为空', true); return; }
-            if (!channel_id) { showToast('请选择渠道', true); return; }
-            if (!target_model) { showToast('请选择目标模型', true); return; }
+            const strategy = document.querySelector('input[name="mappingStrategy"]:checked').value;
+            
+            // Validate name
+            if (!name) {
+                document.getElementById('mappingName').focus();
+                showToast('名称不能为空', true);
+                return;
+            }
+            
+            // Collect targets
+            const targetRows = document.querySelectorAll('#targetsContainer .target-row');
+            const targets = [];
+            
+            for (const row of targetRows) {
+                const channelID = parseInt(row.querySelector('.target-channel').value) || 0;
+                const model = row.querySelector('.target-model').value.trim();
+                
+                if (!channelID) {
+                    showToast('请选择渠道', true);
+                    return;
+                }
+                if (!model) {
+                    showToast('请输入目标模型名', true);
+                    return;
+                }
+                
+                targets.push({
+                    channel_id: channelID,
+                    target_model: model
+                });
+            }
+            
+            if (targets.length === 0) {
+                showToast('至少需要一个目标', true);
+                return;
+            }
+            
             try {
                 const action = editId ? 'update' : 'add';
-                const body = {action, name, channel_id, target_model, note};
+                const channel_type = getSelectedChannelType();
+                const body = {
+                    action,
+                    name,
+                    channel_type,
+                    targets,
+                    strategy,
+                    note
+                };
                 if (editId) body.id = parseInt(editId);
+                
                 const res = await fetch(API_BASE + '/model-mappings', {
-                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(body)
                 });
+                
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || '保存失败');
+                
                 closeMappingModal();
                 await loadMappings();
                 showToast(editId ? '映射已更新' : '映射已添加');
-            } catch (e) { alert('操作失败: ' + (e.message || e)); }
+            } catch (e) {
+                alert('操作失败: ' + (e.message || e));
+            }
         }
 
         async function removeMapping(id) {
@@ -472,7 +591,6 @@
 
         /* ========== Init ========== */
         initModalClose('mappingModal');
-        initModalClose('keyInputModal');
         initModalClose('testResultModal');
         (async () => {
             await loadChannels();

@@ -57,6 +57,35 @@ type BackupData struct {
 	Settings      map[string]string `json:"settings"`
 }
 
+// ModelMapping represents a model alias that maps one name → multiple targets.
+type ModelMapping struct {
+	ID          int                  `json:"id"`
+	Name        string               `json:"name"`
+	ChannelType string               `json:"channel_type"` // "openai" or "anthropic"
+	Strategy    string               `json:"strategy"`     // "round-robin" or "failover"
+	Note        string               `json:"note"`
+	Enabled     bool                 `json:"enabled"`
+	Targets     []ModelMappingTarget `json:"targets"`
+	// Enriched: channel info from first target for backward compat display
+	ChannelID   int    `json:"channel_id,omitempty"`
+	TargetModel string `json:"target_model,omitempty"`
+	ChannelName string `json:"channel_name,omitempty"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// ModelMappingTarget is one target within a model mapping group.
+type ModelMappingTarget struct {
+	ID          int    `json:"id"`
+	MappingID   int    `json:"mapping_id"`
+	ChannelID   int    `json:"channel_id"`
+	TargetModel string `json:"target_model"`
+	Position    int    `json:"position"`
+	Enabled     bool   `json:"enabled"`
+	// Enriched
+	ChannelName string `json:"channel_name,omitempty"`
+	ChannelType string `json:"channel_type,omitempty"`
+}
+
 type ImportSummary struct {
 	Channels      int `json:"channels"`
 	Keys          int `json:"keys"`
@@ -138,6 +167,7 @@ func New(dbPath, defaultURL string) (*KeyPool, error) {
 		"ALTER TABLE channels ADD COLUMN allowed_models TEXT DEFAULT '[]'",
 		"ALTER TABLE channels ADD COLUMN website_url TEXT DEFAULT ''",
 		"ALTER TABLE channels ADD COLUMN proxy_url TEXT DEFAULT ''",
+		"ALTER TABLE model_mappings ADD COLUMN channel_type TEXT DEFAULT 'openai'",
 	} {
 		db.Exec(col) // ignore duplicate-column errors
 	}
@@ -178,20 +208,118 @@ func New(dbPath, defaultURL string) (*KeyPool, error) {
 		return nil, err
 	}
 
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS model_mappings (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT UNIQUE NOT NULL,
-			channel_id INTEGER NOT NULL,
-			target_model TEXT NOT NULL DEFAULT '',
-			note TEXT DEFAULT '',
-			enabled INTEGER DEFAULT 1,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return nil, err
+	// Migrate model_mappings: old (1 name → 1 target) to new (1 name → N targets + strategy).
+	// Only run migration once: when old schema (has channel_id column) is detected.
+	var hasOldMappingTable bool
+	var hasOldChannelID bool
+	db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='model_mappings'`).Scan(&hasOldMappingTable)
+	if hasOldMappingTable {
+		db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('model_mappings') WHERE name='channel_id'`).Scan(&hasOldChannelID)
 	}
+
+	if hasOldMappingTable && hasOldChannelID {
+		// Old schema detected — read existing data, then migrate.
+		type oldMapping struct {
+			Name        string
+			ChannelID   int
+			TargetModel string
+			Note        string
+			Enabled     bool
+		}
+		var oldMappings []oldMapping
+		rows, qerr := db.Query(`SELECT name, channel_id, target_model, COALESCE(note,''), enabled FROM model_mappings`)
+		if qerr == nil {
+			for rows.Next() {
+				var om oldMapping
+				if rows.Scan(&om.Name, &om.ChannelID, &om.TargetModel, &om.Note, &om.Enabled) == nil {
+					oldMappings = append(oldMappings, om)
+				}
+			}
+			rows.Close()
+		}
+
+		// Drop old table and create new schema.
+		db.Exec(`DROP TABLE IF EXISTS model_mappings`)
+		db.Exec(`DROP TABLE IF EXISTS mapping_targets`)
+
+		_, err = db.Exec(`
+			CREATE TABLE model_mappings (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT UNIQUE NOT NULL,
+				channel_type TEXT NOT NULL DEFAULT 'openai',
+				strategy TEXT NOT NULL DEFAULT 'round-robin',
+				note TEXT DEFAULT '',
+				enabled INTEGER DEFAULT 1,
+				last_target_id INTEGER DEFAULT 0,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)
+		`)
+		if err != nil {
+			return nil, err
+		}
+
+		_, err = db.Exec(`
+			CREATE TABLE mapping_targets (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				mapping_id INTEGER NOT NULL,
+				channel_id INTEGER NOT NULL,
+				target_model TEXT NOT NULL DEFAULT '',
+				position INTEGER DEFAULT 0,
+				enabled INTEGER DEFAULT 1,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (mapping_id) REFERENCES model_mappings(id) ON DELETE CASCADE
+			)
+		`)
+		if err != nil {
+			return nil, err
+		}
+
+		// Migrate old data into new tables.
+		for _, om := range oldMappings {
+			res, merr := db.Exec(`INSERT INTO model_mappings (name, strategy, note, enabled) VALUES (?, 'round-robin', ?, ?)`,
+				om.Name, om.Note, boolToInt(om.Enabled))
+			if merr != nil {
+				continue
+			}
+			mid, _ := res.LastInsertId()
+			db.Exec(`INSERT INTO mapping_targets (mapping_id, channel_id, target_model, position, enabled) VALUES (?, ?, ?, 0, ?)`,
+				mid, om.ChannelID, om.TargetModel, boolToInt(om.Enabled))
+		}
+	} else if !hasOldMappingTable {
+		// No table at all — create new schema from scratch.
+		_, err = db.Exec(`
+			CREATE TABLE model_mappings (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT UNIQUE NOT NULL,
+				channel_type TEXT NOT NULL DEFAULT 'openai',
+				strategy TEXT NOT NULL DEFAULT 'round-robin',
+				note TEXT DEFAULT '',
+				enabled INTEGER DEFAULT 1,
+				last_target_id INTEGER DEFAULT 0,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)
+		`)
+		if err != nil {
+			return nil, err
+		}
+
+		_, err = db.Exec(`
+			CREATE TABLE mapping_targets (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				mapping_id INTEGER NOT NULL,
+				channel_id INTEGER NOT NULL,
+				target_model TEXT NOT NULL DEFAULT '',
+				position INTEGER DEFAULT 0,
+				enabled INTEGER DEFAULT 1,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (mapping_id) REFERENCES model_mappings(id) ON DELETE CASCADE
+			)
+		`)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// else: new schema already exists — skip migration, preserve data.
 
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS request_logs (
@@ -666,21 +794,41 @@ func (p *KeyPool) ImportBackup(backup *BackupData) (*ImportSummary, error) {
 		if name == "" {
 			continue
 		}
-		channelID := channelIDMap[mm.ChannelID]
-		if channelID == 0 {
-			channelID = defaultChannelID
+		strategy := mm.Strategy
+		if strategy == "" {
+			strategy = "round-robin"
 		}
-		_, err := tx.Exec(`
-			INSERT INTO model_mappings (name, channel_id, target_model, note, enabled, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)
+		res, err := tx.Exec(`
+			INSERT INTO model_mappings (name, strategy, note, enabled, created_at)
+			VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
-				channel_id = excluded.channel_id,
-				target_model = excluded.target_model,
+				strategy = excluded.strategy,
 				note = excluded.note,
 				enabled = excluded.enabled
-		`, name, channelID, mm.TargetModel, mm.Note, boolToInt(mm.Enabled), defaultCreatedAt(mm.CreatedAt))
+		`, name, strategy, mm.Note, boolToInt(mm.Enabled), defaultCreatedAt(mm.CreatedAt))
 		if err != nil {
 			return nil, err
+		}
+		mappingID, _ := res.LastInsertId()
+
+		// If targets are provided, use them; otherwise convert legacy single-target fields
+		targets := mm.Targets
+		if len(targets) == 0 && mm.ChannelID > 0 {
+			targets = []ModelMappingTarget{{ChannelID: mm.ChannelID, TargetModel: mm.TargetModel}}
+		}
+		// Remove existing targets for this mapping before re-inserting
+		tx.Exec(`DELETE FROM mapping_targets WHERE mapping_id = ?`, mappingID)
+		for i, t := range targets {
+			tch := channelIDMap[t.ChannelID]
+			if tch == 0 {
+				tch = defaultChannelID
+			}
+			pos := t.Position
+			if pos == 0 {
+				pos = i
+			}
+			tx.Exec(`INSERT INTO mapping_targets (mapping_id, channel_id, target_model, position, enabled) VALUES (?, ?, ?, ?, ?)`,
+				mappingID, tch, t.TargetModel, pos, boolToInt(t.Enabled))
 		}
 		summary.ModelMappings++
 	}
@@ -726,27 +874,6 @@ func (p *KeyPool) queryChannels() ([]ChannelInfo, error) {
 		channels = append(channels, c)
 	}
 	return channels, nil
-}
-
-func (p *KeyPool) queryModelMappings() ([]ModelMapping, error) {
-	rows, err := p.db.Query(`
-		SELECT m.id, m.name, m.channel_id, m.target_model, COALESCE(m.note,''), m.enabled, m.created_at
-		FROM model_mappings m
-		ORDER BY m.id
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var mappings []ModelMapping
-	for rows.Next() {
-		var m ModelMapping
-		if err := rows.Scan(&m.ID, &m.Name, &m.ChannelID, &m.TargetModel, &m.Note, &m.Enabled, &m.CreatedAt); err != nil {
-			return nil, err
-		}
-		mappings = append(mappings, m)
-	}
-	return mappings, nil
 }
 
 func (p *KeyPool) GetChannelByPrefix(prefix string) (*ChannelInfo, error) {
@@ -934,27 +1061,16 @@ func (p *KeyPool) DisableProxyKey(key string) error {
 
 // ============ Model Mappings ============
 
-type ModelMapping struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	ChannelID   int    `json:"channel_id"`
-	TargetModel string `json:"target_model"`
-	Note        string `json:"note"`
-	Enabled     bool   `json:"enabled"`
-	CreatedAt   string `json:"created_at"`
-	// Enriched fields (from join)
-	ChannelName string `json:"channel_name,omitempty"`
-	ChannelType string `json:"channel_type,omitempty"`
-}
-
 func (p *KeyPool) GetAllModelMappings() ([]ModelMapping, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	return p.queryModelMappings()
+}
+
+func (p *KeyPool) queryModelMappings() ([]ModelMapping, error) {
 	rows, err := p.db.Query(`
-		SELECT m.id, m.name, m.channel_id, m.target_model, COALESCE(m.note,''), m.enabled, m.created_at,
-		       COALESCE(c.name,''), COALESCE(c.channel_type,'openai')
+		SELECT m.id, m.name, COALESCE(m.channel_type,'openai'), COALESCE(m.strategy,'round-robin'), COALESCE(m.note,''), m.enabled, COALESCE(m.last_target_id,0), m.created_at
 		FROM model_mappings m
-		LEFT JOIN channels c ON c.id = m.channel_id
 		ORDER BY m.id
 	`)
 	if err != nil {
@@ -964,31 +1080,136 @@ func (p *KeyPool) GetAllModelMappings() ([]ModelMapping, error) {
 	var mappings []ModelMapping
 	for rows.Next() {
 		var m ModelMapping
-		if err := rows.Scan(&m.ID, &m.Name, &m.ChannelID, &m.TargetModel, &m.Note, &m.Enabled, &m.CreatedAt, &m.ChannelName, &m.ChannelType); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.ChannelType, &m.Strategy, &m.Note, &m.Enabled, new(int), &m.CreatedAt); err != nil {
 			return nil, err
+		}
+		m.Targets, _ = p.queryTargetsForMapping(m.ID)
+		// Enrich display fields from first enabled target
+		for _, t := range m.Targets {
+			if t.Enabled {
+				m.ChannelID = t.ChannelID
+				m.TargetModel = t.TargetModel
+				m.ChannelName = t.ChannelName
+				break
+			}
 		}
 		mappings = append(mappings, m)
 	}
 	return mappings, nil
 }
 
-func (p *KeyPool) AddModelMapping(name string, channelID int, targetModel, note string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	_, err := p.db.Exec(`INSERT INTO model_mappings (name, channel_id, target_model, note) VALUES (?, ?, ?, ?)`, name, channelID, targetModel, note)
-	return err
+func (p *KeyPool) queryTargetsForMapping(mappingID int) ([]ModelMappingTarget, error) {
+	rows, err := p.db.Query(`
+		SELECT t.id, t.mapping_id, t.channel_id, t.target_model, t.position, t.enabled,
+		       COALESCE(c.name,''), COALESCE(c.channel_type,'openai')
+		FROM mapping_targets t
+		LEFT JOIN channels c ON c.id = t.channel_id
+		WHERE t.mapping_id = ?
+		ORDER BY t.position, t.id
+	`, mappingID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var targets []ModelMappingTarget
+	for rows.Next() {
+		var t ModelMappingTarget
+		if err := rows.Scan(&t.ID, &t.MappingID, &t.ChannelID, &t.TargetModel, &t.Position, &t.Enabled, &t.ChannelName, &t.ChannelType); err != nil {
+			return nil, err
+		}
+		targets = append(targets, t)
+	}
+	return targets, nil
 }
 
-func (p *KeyPool) UpdateModelMapping(id int, name string, channelID int, targetModel, note string) error {
+func (p *KeyPool) GetModelMappingByID(id int) (*ModelMapping, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var m ModelMapping
+	err := p.db.QueryRow(`
+		SELECT m.id, m.name, COALESCE(m.channel_type,'openai'), COALESCE(m.strategy,'round-robin'), COALESCE(m.note,''), m.enabled, m.created_at
+		FROM model_mappings m WHERE m.id = ?
+	`, id).Scan(&m.ID, &m.Name, &m.ChannelType, &m.Strategy, &m.Note, &m.Enabled, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	m.Targets, _ = p.queryTargetsForMapping(m.ID)
+	return &m, nil
+}
+
+func (p *KeyPool) AddModelMappingGroup(name, channelType, strategy, note string, targets []ModelMappingTarget) error {
+	if channelType == "" {
+		channelType = "openai"
+	}
+	if channelType != "openai" && channelType != "anthropic" {
+		channelType = "openai"
+	}
+	if strategy == "" {
+		strategy = "round-robin"
+	}
+	if strategy != "round-robin" && strategy != "failover" {
+		strategy = "round-robin"
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, err := p.db.Exec(`UPDATE model_mappings SET name = ?, channel_id = ?, target_model = ?, note = ? WHERE id = ?`, name, channelID, targetModel, note, id)
-	return err
+	res, err := p.db.Exec(`INSERT INTO model_mappings (name, channel_type, strategy, note) VALUES (?, ?, ?, ?)`, name, channelType, strategy, note)
+	if err != nil {
+		return err
+	}
+	mappingID, _ := res.LastInsertId()
+	for i, t := range targets {
+		pos := t.Position
+		if pos == 0 {
+			pos = i
+		}
+		_, terr := p.db.Exec(`INSERT INTO mapping_targets (mapping_id, channel_id, target_model, position, enabled) VALUES (?, ?, ?, ?, 1)`,
+			mappingID, t.ChannelID, t.TargetModel, pos)
+		if terr != nil {
+			return terr
+		}
+	}
+	return nil
+}
+
+func (p *KeyPool) UpdateModelMappingGroup(id int, name, channelType, strategy, note string, targets []ModelMappingTarget) error {
+	if channelType == "" {
+		channelType = "openai"
+	}
+	if channelType != "openai" && channelType != "anthropic" {
+		channelType = "openai"
+	}
+	if strategy == "" {
+		strategy = "round-robin"
+	}
+	if strategy != "round-robin" && strategy != "failover" {
+		strategy = "round-robin"
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.db.Exec(`UPDATE model_mappings SET name = ?, channel_type = ?, strategy = ?, note = ? WHERE id = ?`, name, channelType, strategy, note, id)
+	if err != nil {
+		return err
+	}
+	// Replace all targets
+	p.db.Exec(`DELETE FROM mapping_targets WHERE mapping_id = ?`, id)
+	for i, t := range targets {
+		pos := t.Position
+		if pos == 0 {
+			pos = i
+		}
+		_, terr := p.db.Exec(`INSERT INTO mapping_targets (mapping_id, channel_id, target_model, position, enabled) VALUES (?, ?, ?, ?, ?)`,
+			id, t.ChannelID, t.TargetModel, pos, boolToInt(t.Enabled))
+		if terr != nil {
+			return terr
+		}
+	}
+	return nil
 }
 
 func (p *KeyPool) RemoveModelMapping(id int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.db.Exec(`DELETE FROM mapping_targets WHERE mapping_id = ?`, id)
 	_, err := p.db.Exec(`DELETE FROM model_mappings WHERE id = ?`, id)
 	return err
 }
@@ -996,15 +1217,64 @@ func (p *KeyPool) RemoveModelMapping(id int) error {
 // ResolveModelMapping looks up a model name in model_mappings.
 // Returns (channelID, targetModel, true) if found and enabled, or (0, "", false) if not a mapping.
 func (p *KeyPool) ResolveModelMapping(modelName string) (int, string, bool) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	var channelID int
-	var targetModel string
-	err := p.db.QueryRow(`SELECT channel_id, target_model FROM model_mappings WHERE name = ? AND enabled = 1`, modelName).Scan(&channelID, &targetModel)
-	if err != nil || channelID == 0 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if modelName == "" {
 		return 0, "", false
 	}
-	return channelID, targetModel, true
+
+	// Get mapping group
+	var mappingID int
+	var strategy string
+	var lastTargetID int
+	err := p.db.QueryRow(`SELECT id, COALESCE(strategy,'round-robin'), COALESCE(last_target_id,0) FROM model_mappings WHERE name = ? AND enabled = 1`, modelName).Scan(&mappingID, &strategy, &lastTargetID)
+	if err != nil {
+		return 0, "", false
+	}
+
+	// Get enabled targets ordered by position
+	rows, err := p.db.Query(`
+		SELECT id, channel_id, target_model FROM mapping_targets
+		WHERE mapping_id = ? AND enabled = 1
+		ORDER BY position, id
+	`, mappingID)
+	if err != nil {
+		return 0, "", false
+	}
+	defer rows.Close()
+
+	type targetRow struct {
+		id          int
+		channelID   int
+		targetModel string
+	}
+	var targets []targetRow
+	for rows.Next() {
+		var t targetRow
+		if rows.Scan(&t.id, &t.channelID, &t.targetModel) == nil {
+			targets = append(targets, t)
+		}
+	}
+	if len(targets) == 0 {
+		return 0, "", false
+	}
+
+	if strategy == "round-robin" {
+		// Find last used index, pick next
+		idx := 0
+		for i, t := range targets {
+			if t.id == lastTargetID {
+				idx = (i + 1) % len(targets)
+				break
+			}
+		}
+		chosen := targets[idx]
+		p.db.Exec(`UPDATE model_mappings SET last_target_id = ? WHERE id = ?`, chosen.id, mappingID)
+		return chosen.channelID, chosen.targetModel, true
+	}
+
+	// failover: always return first enabled target
+	return targets[0].channelID, targets[0].targetModel, true
 }
 
 // ============ Request Logs ============

@@ -984,8 +984,18 @@ func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channel
 	mappedOnly := make(map[string]bool)    // all mapping names for this type
 	if mappings, merr := h.pool.GetAllModelMappings(); merr == nil {
 		for _, m := range mappings {
-			if m.Enabled && m.ChannelType == channelType {
-				mappedNames[m.TargetModel] = m.Name
+			if !m.Enabled {
+				continue
+			}
+			// Check if any target belongs to this channel type
+			hasType := false
+			for _, t := range m.Targets {
+				if t.Enabled && t.ChannelType == channelType {
+					hasType = true
+					mappedNames[t.TargetModel] = m.Name
+				}
+			}
+			if hasType {
 				mappedOnly[m.Name] = true
 			}
 		}
@@ -1160,12 +1170,16 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			Action      string `json:"action"`
-			ID          int    `json:"id"`
-			Name        string `json:"name"`
+			Action      string               `json:"action"`
+			ID          int                  `json:"id"`
+			Name        string               `json:"name"`
+			ChannelType string               `json:"channel_type"`
+			Strategy    string               `json:"strategy"`
+			Note        string               `json:"note"`
+			Targets     []ModelMappingTarget `json:"targets"`
+			// Legacy fields (for backward compat)
 			ChannelID   int    `json:"channel_id"`
 			TargetModel string `json:"target_model"`
-			Note        string `json:"note"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
@@ -1175,11 +1189,27 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 		var err error
 		switch req.Action {
 		case "add":
-			err = h.pool.AddModelMapping(req.Name, req.ChannelID, req.TargetModel, req.Note)
+			targets := req.Targets
+			if len(targets) == 0 && req.ChannelID > 0 {
+				targets = []ModelMappingTarget{{ChannelID: req.ChannelID, TargetModel: req.TargetModel}}
+			}
+			err = h.pool.AddModelMappingGroup(req.Name, req.ChannelType, req.Strategy, req.Note, targets)
 		case "update":
-			err = h.pool.UpdateModelMapping(req.ID, req.Name, req.ChannelID, req.TargetModel, req.Note)
+			targets := req.Targets
+			if len(targets) == 0 && req.ChannelID > 0 {
+				targets = []ModelMappingTarget{{ChannelID: req.ChannelID, TargetModel: req.TargetModel}}
+			}
+			err = h.pool.UpdateModelMappingGroup(req.ID, req.Name, req.ChannelType, req.Strategy, req.Note, targets)
 		case "remove":
 			err = h.pool.RemoveModelMapping(req.ID)
+		case "get":
+			m, gerr := h.pool.GetModelMappingByID(req.ID)
+			if gerr != nil {
+				http.Error(w, `{"error":"`+gerr.Error()+`"}`, http.StatusNotFound)
+				return
+			}
+			json.NewEncoder(w).Encode(m)
+			return
 		default:
 			http.Error(w, `{"error":"Unknown action"}`, http.StatusBadRequest)
 			return
@@ -1213,13 +1243,18 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If ID is provided, look up the mapping
+	// If ID is provided, look up the mapping and use first target
 	if req.ID > 0 {
 		mappings, _ := h.pool.GetAllModelMappings()
 		for _, m := range mappings {
 			if m.ID == req.ID {
-				req.ChannelID = m.ChannelID
-				req.TargetModel = m.TargetModel
+				if len(m.Targets) > 0 {
+					req.ChannelID = m.Targets[0].ChannelID
+					req.TargetModel = m.Targets[0].TargetModel
+				} else {
+					req.ChannelID = m.ChannelID
+					req.TargetModel = m.TargetModel
+				}
 				break
 			}
 		}

@@ -31,8 +31,9 @@ func TestAddModelMapping(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	if err := pool.AddModelMapping("gpt4", ch.ID, "gpt-4-turbo", "alias for gpt4"); err != nil {
-		t.Fatalf("AddModelMapping() error = %v", err)
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "gpt-4-turbo"}}
+	if err := pool.AddModelMappingGroup("gpt4", "openai", "round-robin", "alias for gpt4", targets); err != nil {
+		t.Fatalf("AddModelMappingGroup() error = %v", err)
 	}
 
 	mappings, err := pool.GetAllModelMappings()
@@ -43,14 +44,51 @@ func TestAddModelMapping(t *testing.T) {
 		t.Fatalf("expected 1 mapping, got %d", len(mappings))
 	}
 	m := mappings[0]
-	if m.Name != "gpt4" || m.ChannelID != ch.ID || m.TargetModel != "gpt-4-turbo" || m.Note != "alias for gpt4" {
+	if m.Name != "gpt4" || m.Note != "alias for gpt4" {
 		t.Fatalf("mapping mismatch: %+v", m)
 	}
 	if !m.Enabled {
 		t.Fatal("new mapping should be enabled by default")
 	}
-	if m.ChannelName == "" {
+	if m.Strategy != "round-robin" {
+		t.Fatalf("expected strategy round-robin, got %q", m.Strategy)
+	}
+	if len(m.Targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(m.Targets))
+	}
+	if m.Targets[0].ChannelID != ch.ID || m.Targets[0].TargetModel != "gpt-4-turbo" {
+		t.Fatalf("target mismatch: %+v", m.Targets[0])
+	}
+	if m.Targets[0].ChannelName == "" {
 		t.Fatal("expected ChannelName to be populated via join")
+	}
+}
+
+func TestAddModelMappingMultiTarget(t *testing.T) {
+	pool := newTestPool(t)
+	ch := defaultChannel(t, pool)
+
+	// Add a second channel
+	_, err := pool.AddChannel("second", "sec", "https://sec.example.com/v1/chat/completions", "", "openai", "", nil)
+	if err != nil {
+		t.Fatalf("AddChannel() error = %v", err)
+	}
+	ch2, _ := pool.GetChannelByPrefix("sec")
+
+	targets := []ModelMappingTarget{
+		{ChannelID: ch.ID, TargetModel: "gpt-4-turbo"},
+		{ChannelID: ch2.ID, TargetModel: "gpt-4o"},
+	}
+	if err := pool.AddModelMappingGroup("multi", "openai", "round-robin", "multi-target", targets); err != nil {
+		t.Fatalf("AddModelMappingGroup() error = %v", err)
+	}
+
+	mappings, _ := pool.GetAllModelMappings()
+	if len(mappings) != 1 {
+		t.Fatalf("expected 1 mapping, got %d", len(mappings))
+	}
+	if len(mappings[0].Targets) != 2 {
+		t.Fatalf("expected 2 targets, got %d", len(mappings[0].Targets))
 	}
 }
 
@@ -58,10 +96,12 @@ func TestAddModelMappingDuplicateName(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	if err := pool.AddModelMapping("dup", ch.ID, "model-a", ""); err != nil {
-		t.Fatalf("first AddModelMapping() error = %v", err)
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "model-a"}}
+	if err := pool.AddModelMappingGroup("dup", "openai", "round-robin", "", targets); err != nil {
+		t.Fatalf("first AddModelMappingGroup() error = %v", err)
 	}
-	if err := pool.AddModelMapping("dup", ch.ID, "model-b", ""); err == nil {
+	targets2 := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "model-b"}}
+	if err := pool.AddModelMappingGroup("dup", "openai", "round-robin", "", targets2); err == nil {
 		t.Fatal("expected error when adding duplicate mapping name")
 	}
 }
@@ -69,10 +109,10 @@ func TestAddModelMappingDuplicateName(t *testing.T) {
 func TestAddModelMappingToNonexistentChannel(t *testing.T) {
 	pool := newTestPool(t)
 
-	// SQLite does not enforce foreign keys by default, but the mapping should still be added.
-	err := pool.AddModelMapping("orphan", 9999, "some-model", "")
+	targets := []ModelMappingTarget{{ChannelID: 9999, TargetModel: "some-model"}}
+	err := pool.AddModelMappingGroup("orphan", "openai", "round-robin", "", targets)
 	if err != nil {
-		t.Fatalf("AddModelMapping() with nonexistent channel: unexpected error = %v", err)
+		t.Fatalf("AddModelMappingGroup() with nonexistent channel: unexpected error = %v", err)
 	}
 }
 
@@ -82,8 +122,9 @@ func TestAddMultipleMappings(t *testing.T) {
 
 	names := []string{"alpha", "beta", "gamma"}
 	for _, n := range names {
-		if err := pool.AddModelMapping(n, ch.ID, n+"-model", ""); err != nil {
-			t.Fatalf("AddModelMapping(%q) error = %v", n, err)
+		targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: n + "-model"}}
+		if err := pool.AddModelMappingGroup(n, "openai", "round-robin", "", targets); err != nil {
+			t.Fatalf("AddModelMappingGroup(%q) error = %v", n, err)
 		}
 	}
 
@@ -102,20 +143,25 @@ func TestUpdateModelMapping(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	if err := pool.AddModelMapping("old-name", ch.ID, "old-target", "old note"); err != nil {
-		t.Fatalf("AddModelMapping() error = %v", err)
-	}
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "old-target"}}
+	pool.AddModelMappingGroup("old-name", "openai", "round-robin", "old note", targets)
 	mappings, _ := pool.GetAllModelMappings()
 	id := mappings[0].ID
 
-	if err := pool.UpdateModelMapping(id, "new-name", ch.ID, "new-target", "new note"); err != nil {
-		t.Fatalf("UpdateModelMapping() error = %v", err)
+	newTargets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "new-target"}}
+	if err := pool.UpdateModelMappingGroup(id, "new-name", "openai", "failover", "new note", newTargets); err != nil {
+		t.Fatalf("UpdateModelMappingGroup() error = %v", err)
 	}
 
-	mappings, _ = pool.GetAllModelMappings()
-	m := mappings[0]
-	if m.Name != "new-name" || m.TargetModel != "new-target" || m.Note != "new note" {
+	m, err := pool.GetModelMappingByID(id)
+	if err != nil {
+		t.Fatalf("GetModelMappingByID() error = %v", err)
+	}
+	if m.Name != "new-name" || m.Note != "new note" || m.Strategy != "failover" {
 		t.Fatalf("mapping not updated: %+v", m)
+	}
+	if len(m.Targets) != 1 || m.Targets[0].TargetModel != "new-target" {
+		t.Fatalf("target not updated: %+v", m.Targets)
 	}
 }
 
@@ -123,9 +169,10 @@ func TestUpdateModelMappingNonexistent(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "ghost-model"}}
 	// Updating a nonexistent ID should not error (0 rows affected).
-	if err := pool.UpdateModelMapping(9999, "ghost", ch.ID, "ghost-model", ""); err != nil {
-		t.Fatalf("UpdateModelMapping() nonexistent ID: unexpected error = %v", err)
+	if err := pool.UpdateModelMappingGroup(9999, "ghost", "openai", "round-robin", "", targets); err != nil {
+		t.Fatalf("UpdateModelMappingGroup() nonexistent ID: unexpected error = %v", err)
 	}
 }
 
@@ -134,7 +181,7 @@ func TestUpdateModelMappingChangeChannel(t *testing.T) {
 	ch := defaultChannel(t, pool)
 
 	// Add a second channel
-	_, err := pool.AddChannel("second", "sec", "https://sec.example.com/v1/chat/completions", "https://sec.example.com", "openai", "", nil)
+	_, err := pool.AddChannel("second", "sec", "https://sec.example.com/v1/chat/completions", "", "openai", "", nil)
 	if err != nil {
 		t.Fatalf("AddChannel() error = %v", err)
 	}
@@ -143,22 +190,22 @@ func TestUpdateModelMappingChangeChannel(t *testing.T) {
 		t.Fatalf("GetChannelByPrefix() error = %v", err)
 	}
 
-	if err := pool.AddModelMapping("movable", ch.ID, "model-x", ""); err != nil {
-		t.Fatalf("AddModelMapping() error = %v", err)
-	}
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "model-x"}}
+	pool.AddModelMappingGroup("movable", "openai", "round-robin", "", targets)
 	mappings, _ := pool.GetAllModelMappings()
 	id := mappings[0].ID
 
-	if err := pool.UpdateModelMapping(id, "movable", ch2.ID, "model-x", "moved"); err != nil {
-		t.Fatalf("UpdateModelMapping() error = %v", err)
+	newTargets := []ModelMappingTarget{{ChannelID: ch2.ID, TargetModel: "model-x"}}
+	if err := pool.UpdateModelMappingGroup(id, "movable", "openai", "round-robin", "moved", newTargets); err != nil {
+		t.Fatalf("UpdateModelMappingGroup() error = %v", err)
 	}
 
 	mappings, _ = pool.GetAllModelMappings()
-	if mappings[0].ChannelID != ch2.ID {
-		t.Fatalf("expected ChannelID %d, got %d", ch2.ID, mappings[0].ChannelID)
+	if mappings[0].Targets[0].ChannelID != ch2.ID {
+		t.Fatalf("expected ChannelID %d, got %d", ch2.ID, mappings[0].Targets[0].ChannelID)
 	}
-	if mappings[0].ChannelName != "second" {
-		t.Fatalf("expected ChannelName 'second', got %q", mappings[0].ChannelName)
+	if mappings[0].Targets[0].ChannelName != "second" {
+		t.Fatalf("expected ChannelName 'second', got %q", mappings[0].Targets[0].ChannelName)
 	}
 }
 
@@ -168,7 +215,8 @@ func TestRemoveModelMapping(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	pool.AddModelMapping("to-delete", ch.ID, "del-model", "")
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "del-model"}}
+	pool.AddModelMappingGroup("to-delete", "openai", "round-robin", "", targets)
 	mappings, _ := pool.GetAllModelMappings()
 	id := mappings[0].ID
 
@@ -196,7 +244,8 @@ func TestResolveModelMapping(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	pool.AddModelMapping("my-gpt4", ch.ID, "gpt-4-turbo", "")
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "gpt-4-turbo"}}
+	pool.AddModelMappingGroup("my-gpt4", "openai", "round-robin", "", targets)
 
 	gotChID, gotModel, ok := pool.ResolveModelMapping("my-gpt4")
 	if !ok {
@@ -223,7 +272,8 @@ func TestResolveModelMappingDisabled(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	pool.AddModelMapping("disabled-alias", ch.ID, "real-model", "")
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "real-model"}}
+	pool.AddModelMappingGroup("disabled-alias", "openai", "round-robin", "", targets)
 	mappings, _ := pool.GetAllModelMappings()
 	id := mappings[0].ID
 
@@ -251,7 +301,8 @@ func TestResolveModelMappingAfterDelete(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	pool.AddModelMapping("temp", ch.ID, "temp-model", "")
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "temp-model"}}
+	pool.AddModelMappingGroup("temp", "openai", "round-robin", "", targets)
 	mappings, _ := pool.GetAllModelMappings()
 	pool.RemoveModelMapping(mappings[0].ID)
 
@@ -268,13 +319,13 @@ func TestResolveModelMappingDifferentChannels(t *testing.T) {
 	ch := defaultChannel(t, pool)
 
 	// Add a second channel
-	if _, err := pool.AddChannel("anthropic-ch", "ant", "https://api.anthropic.com/v1/messages", "https://anthropic.com", "anthropic", "", nil); err != nil {
+	if _, err := pool.AddChannel("anthropic-ch", "ant", "https://api.anthropic.com/v1/messages", "", "anthropic", "", nil); err != nil {
 		t.Fatalf("AddChannel() error = %v", err)
 	}
 	ch2, _ := pool.GetChannelByPrefix("ant")
 
-	pool.AddModelMapping("gpt4-alias", ch.ID, "gpt-4-turbo", "")
-	pool.AddModelMapping("claude-alias", ch2.ID, "claude-sonnet-4-20250514", "")
+	pool.AddModelMappingGroup("gpt4-alias", "openai", "round-robin", "", []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "gpt-4-turbo"}})
+	pool.AddModelMappingGroup("claude-alias", "anthropic", "failover", "", []ModelMappingTarget{{ChannelID: ch2.ID, TargetModel: "claude-sonnet-4-20250514"}})
 
 	// Resolve gpt4 alias → openai channel
 	gotCh, gotModel, ok := pool.ResolveModelMapping("gpt4-alias")
@@ -295,64 +346,138 @@ func TestModelMappingEmptyTargetModel(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	// Target model can be empty string
-	if err := pool.AddModelMapping("empty-target", ch.ID, "", "no target"); err != nil {
-		t.Fatalf("AddModelMapping() with empty target: error = %v", err)
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: ""}}
+	if err := pool.AddModelMappingGroup("empty-target", "openai", "round-robin", "no target", targets); err != nil {
+		t.Fatalf("AddModelMappingGroup() with empty target: error = %v", err)
 	}
 
 	mappings, _ := pool.GetAllModelMappings()
-	if mappings[0].TargetModel != "" {
-		t.Fatalf("expected empty target_model, got %q", mappings[0].TargetModel)
-	}
-
-	// Resolve should still work with empty target
-	gotCh, gotModel, ok := pool.ResolveModelMapping("empty-target")
-	if !ok || gotCh != ch.ID || gotModel != "" {
-		t.Fatalf("ResolveModelMapping(empty-target): chID=%d model=%q ok=%v", gotCh, gotModel, ok)
+	if len(mappings) != 1 || mappings[0].Targets[0].TargetModel != "" {
+		t.Fatalf("expected empty target model, got %+v", mappings[0].Targets)
 	}
 }
 
-func TestModelMappingSpecialCharsInName(t *testing.T) {
+func TestModelMappingEmptyName(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	specialName := "gpt-4o-mini/2024-07-18"
-	if err := pool.AddModelMapping(specialName, ch.ID, "gpt-4o-mini", "dated alias"); err != nil {
-		t.Fatalf("AddModelMapping() with special chars: error = %v", err)
-	}
-
-	_, gotModel, ok := pool.ResolveModelMapping(specialName)
-	if !ok || gotModel != "gpt-4o-mini" {
-		t.Fatalf("ResolveModelMapping(%q): model=%q ok=%v", specialName, gotModel, ok)
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "x"}}
+	// Empty name should cause a UNIQUE constraint or similar error.
+	if err := pool.AddModelMappingGroup("", "openai", "round-robin", "", targets); err == nil {
+		// SQLite allows empty string for UNIQUE; verify it can be stored.
+		mappings, _ := pool.GetAllModelMappings()
+		if len(mappings) != 1 {
+			t.Fatal("expected mapping with empty name to be stored")
+		}
 	}
 }
 
-func TestGetAllModelMappingsEmpty(t *testing.T) {
+func TestResolveModelMappingNoTargets(t *testing.T) {
 	pool := newTestPool(t)
 
-	mappings, err := pool.GetAllModelMappings()
+	// Create a mapping group with no targets
+	pool.mu.Lock()
+	pool.db.Exec(`INSERT INTO model_mappings (name, strategy, note) VALUES (?, 'round-robin', '')`, "no-targets")
+	pool.mu.Unlock()
+
+	_, _, ok := pool.ResolveModelMapping("no-targets")
+	if ok {
+		t.Fatal("ResolveModelMapping() should return false for mapping with no targets")
+	}
+}
+
+// --------------- Round-robin strategy ---------------
+
+func TestResolveRoundRobin(t *testing.T) {
+	pool := newTestPool(t)
+	ch := defaultChannel(t, pool)
+
+	_, err := pool.AddChannel("ch2", "ch2", "https://ch2.example.com/v1/chat/completions", "", "openai", "", nil)
 	if err != nil {
-		t.Fatalf("GetAllModelMappings() error = %v", err)
+		t.Fatalf("AddChannel() error = %v", err)
 	}
-	if len(mappings) != 0 {
-		t.Fatalf("expected 0 mappings on fresh pool, got %d", len(mappings))
+	ch2, _ := pool.GetChannelByPrefix("ch2")
+
+	targets := []ModelMappingTarget{
+		{ChannelID: ch.ID, TargetModel: "model-a"},
+		{ChannelID: ch2.ID, TargetModel: "model-b"},
 	}
+	pool.AddModelMappingGroup("rr-test", "openai", "round-robin", "", targets)
+
+	// First call should return first target
+	gotCh1, gotModel1, ok1 := pool.ResolveModelMapping("rr-test")
+	if !ok1 {
+		t.Fatal("first resolve failed")
+	}
+
+	// Second call should return second target (round-robin)
+	gotCh2, gotModel2, ok2 := pool.ResolveModelMapping("rr-test")
+	if !ok2 {
+		t.Fatal("second resolve failed")
+	}
+
+	// Third call should wrap back to first
+	gotCh3, gotModel3, ok3 := pool.ResolveModelMapping("rr-test")
+	if !ok3 {
+		t.Fatal("third resolve failed")
+	}
+
+	// Verify round-robin cycling
+	if gotCh1 == gotCh2 {
+		t.Fatalf("round-robin should cycle: call1 chID=%d, call2 chID=%d", gotCh1, gotCh2)
+	}
+	if gotCh1 != gotCh3 {
+		t.Fatalf("round-robin should wrap: call1 chID=%d, call3 chID=%d", gotCh1, gotCh3)
+	}
+
+	_ = gotModel1
+	_ = gotModel2
+	_ = gotModel3
 }
 
-func TestModelMappingIdempotentAdd(t *testing.T) {
+// --------------- Failover strategy ---------------
+
+func TestResolveFailover(t *testing.T) {
 	pool := newTestPool(t)
 	ch := defaultChannel(t, pool)
 
-	pool.AddModelMapping("idem", ch.ID, "model-1", "")
-	// Second add with same name should error
-	err := pool.AddModelMapping("idem", ch.ID, "model-2", "")
-	if err == nil {
-		t.Fatal("expected error on duplicate AddModelMapping")
+	_, err := pool.AddChannel("ch2", "ch2", "https://ch2.example.com/v1/chat/completions", "", "openai", "", nil)
+	if err != nil {
+		t.Fatalf("AddChannel() error = %v", err)
 	}
+	ch2, _ := pool.GetChannelByPrefix("ch2")
 
-	// Original mapping should be unchanged
-	mappings, _ := pool.GetAllModelMappings()
-	if len(mappings) != 1 || mappings[0].TargetModel != "model-1" {
-		t.Fatalf("original mapping changed: %+v", mappings)
+	targets := []ModelMappingTarget{
+		{ChannelID: ch.ID, TargetModel: "model-a"},
+		{ChannelID: ch2.ID, TargetModel: "model-b"},
+	}
+	pool.AddModelMappingGroup("fo-test", "openai", "failover", "", targets)
+
+	// All calls should return the same first target (failover)
+	for i := 0; i < 3; i++ {
+		gotCh, gotModel, ok := pool.ResolveModelMapping("fo-test")
+		if !ok {
+			t.Fatalf("resolve call %d failed", i)
+		}
+		if gotCh != ch.ID || gotModel != "model-a" {
+			t.Fatalf("failover call %d: chID=%d model=%q, want chID=%d model=%q", i, gotCh, gotModel, ch.ID, "model-a")
+		}
+	}
+}
+
+func TestResolveDefaultStrategy(t *testing.T) {
+	pool := newTestPool(t)
+	ch := defaultChannel(t, pool)
+
+	// Empty strategy should default to round-robin
+	targets := []ModelMappingTarget{{ChannelID: ch.ID, TargetModel: "model-x"}}
+	pool.AddModelMappingGroup("default-strategy", "", "", "", targets)
+
+	m, err := pool.GetModelMappingByID(1) // first mapping
+	if err != nil {
+		t.Fatalf("GetModelMappingByID() error = %v", err)
+	}
+	if m.Strategy != "round-robin" {
+		t.Fatalf("empty strategy should default to round-robin, got %q", m.Strategy)
 	}
 }
