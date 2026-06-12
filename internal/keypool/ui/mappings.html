@@ -77,7 +77,7 @@
                 <div class="field-group" style="margin-top:1rem;">
                     <label>目标模型 <span style="color:hsl(0 84.2% 60.2%)">*</span></label>
                     <div style="display:flex;gap:0.5rem;">
-                        <select id="mappingModel" style="flex:1;">
+                        <select id="mappingModel" style="flex:1;" onchange="onMappingModelChange()">
                             <option value="">请先选择渠道并加载模型</option>
                         </select>
                         <button class="btn btn-outline" id="mappingRefreshBtn" onclick="fetchMappingModels()" data-tip="刷新模型列表">
@@ -232,6 +232,25 @@
             document.getElementById('mappingModel').innerHTML = '<option value="">点击刷新获取模型列表</option>';
         }
 
+        // When selecting a model, auto-fill the mapping name with
+        // "<model>-<channel-name>". Always overwrites any previous value.
+        function onMappingModelChange() {
+            const model = document.getElementById('mappingModel').value;
+            if (!model) return;
+
+            const channelSel = document.getElementById('mappingChannel');
+            const selectedOption = channelSel.options[channelSel.selectedIndex];
+            if (!selectedOption || !selectedOption.value) return;
+            const channelName = selectedOption.text || '';
+
+            // Strip the type tag like " [OpenAI]" / " [Anthropic]" from the
+            // channel display text so the auto-generated name stays clean.
+            const cleanChannelName = channelName.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
+
+            document.getElementById('mappingName').value =
+                cleanChannelName ? `${model}-${cleanChannelName}` : model;
+        }
+
         /* ========== Fetch Models ========== */
 
         let keyInputResolve = null;
@@ -288,7 +307,20 @@
                 const data = await res.json();
                 const models = (data.data || []).map(m => m.id);
                 if (models.length === 0) {
-                    sel.innerHTML = '<option value="">未获取到模型</option>';
+                    // Fallback: use channel's allowed_models
+                    const channel = allChannels.find(c => c.id === parseInt(channelID));
+                    const fallbackModels = (channel && channel.allowed_models && channel.allowed_models.length > 0) ? channel.allowed_models : [];
+                    if (fallbackModels.length > 0) {
+                        let opts = '<option value="">选择模型（来自渠道配置）</option>';
+                        for (const m of fallbackModels) {
+                            const selected = m === prevModel ? ' selected' : '';
+                            opts += `<option value="${m}"${selected}>${m}</option>`;
+                        }
+                        sel.innerHTML = opts;
+                        showToast('使用渠道配置的模型列表', false);
+                    } else {
+                        sel.innerHTML = '<option value="">未获取到模型</option>';
+                    }
                     return;
                 }
                 let opts = '<option value="">选择模型</option>';
@@ -298,8 +330,21 @@
                 }
                 sel.innerHTML = opts;
             } catch (e) {
-                sel.innerHTML = '<option value="">获取失败</option>';
-                showToast('模型列表获取失败', true);
+                // Fallback: use channel's allowed_models on error
+                const channel = allChannels.find(c => c.id === parseInt(channelID));
+                const fallbackModels = (channel && channel.allowed_models && channel.allowed_models.length > 0) ? channel.allowed_models : [];
+                if (fallbackModels.length > 0) {
+                    let opts = '<option value="">选择模型（来自渠道配置）</option>';
+                    for (const m of fallbackModels) {
+                        const selected = m === prevModel ? ' selected' : '';
+                        opts += `<option value="${m}"${selected}>${m}</option>`;
+                    }
+                    sel.innerHTML = opts;
+                    showToast('模型列表获取失败，使用渠道配置的模型列表', false);
+                } else {
+                    sel.innerHTML = '<option value="">获取失败</option>';
+                    showToast('模型列表获取失败', true);
+                }
             } finally {
                 btn.disabled = false;
             }

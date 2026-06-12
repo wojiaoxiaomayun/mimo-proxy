@@ -713,15 +713,21 @@ func (h *Handler) swapModelIfNeeded(body []byte, models []string, defaultModel s
 	return newBody
 }
 
-// validateProxyAuth checks the client's Authorization header against proxy_keys.
+// validateProxyAuth checks the client's Authorization header (or x-api-key) against proxy_keys.
+// Supports both Bearer token and Anthropic-style x-api-key header.
 func (h *Handler) validateProxyAuth(r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		return false
+	token := ""
+	if auth != "" {
+		token = auth
+		if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+			token = auth[7:]
+		}
+	} else if xKey := r.Header.Get("x-api-key"); xKey != "" {
+		token = xKey
 	}
-	token := auth
-	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-		token = auth[7:]
+	if token == "" {
+		return false
 	}
 	return h.pool.ValidateProxyKey(strings.TrimSpace(token))
 }
@@ -737,13 +743,16 @@ func truncKey(key string, n int) string {
 	return key
 }
 
-// extractProxyKey extracts the proxy key from the Authorization header.
+// extractProxyKey extracts the proxy key from the Authorization header or x-api-key header.
 func extractProxyKey(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-		return auth[7:]
+	if auth != "" {
+		if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+			return auth[7:]
+		}
+		return auth
 	}
-	return auth
+	return r.Header.Get("x-api-key")
 }
 
 // extractModel extracts the model field from a JSON request body.
@@ -1346,6 +1355,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			Name          string   `json:"name"`
 			Prefix        string   `json:"prefix"`
 			BaseURL       string   `json:"base_url"`
+			WebsiteURL    string   `json:"website_url"`
 			ChannelType   string   `json:"channel_type"`
 			KeyMode       string   `json:"key_mode"`
 			AllowedModels []string `json:"allowed_models"`
@@ -1357,7 +1367,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 
 		switch req.Action {
 		case "add":
-			id, err := h.pool.AddChannel(req.Name, req.Prefix, req.BaseURL, req.ChannelType, req.AllowedModels)
+			id, err := h.pool.AddChannel(req.Name, req.Prefix, req.BaseURL, req.WebsiteURL, req.ChannelType, req.AllowedModels)
 			if err != nil {
 				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 				return
@@ -1367,7 +1377,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			}
 			json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "id": id})
 		case "update":
-			if err := h.pool.UpdateChannel(req.ID, req.Name, req.Prefix, req.BaseURL, req.ChannelType, req.AllowedModels); err != nil {
+			if err := h.pool.UpdateChannel(req.ID, req.Name, req.Prefix, req.BaseURL, req.WebsiteURL, req.ChannelType, req.AllowedModels); err != nil {
 				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 				return
 			}

@@ -134,7 +134,7 @@ func TestUpdateModelMappingChangeChannel(t *testing.T) {
 	ch := defaultChannel(t, pool)
 
 	// Add a second channel
-	_, err := pool.AddChannel("second", "sec", "https://sec.example.com/v1/chat/completions", "openai", nil)
+	_, err := pool.AddChannel("second", "sec", "https://sec.example.com/v1/chat/completions", "https://sec.example.com", "openai", nil)
 	if err != nil {
 		t.Fatalf("AddChannel() error = %v", err)
 	}
@@ -268,7 +268,7 @@ func TestResolveModelMappingDifferentChannels(t *testing.T) {
 	ch := defaultChannel(t, pool)
 
 	// Add a second channel
-	if _, err := pool.AddChannel("anthropic-ch", "ant", "https://api.anthropic.com/v1/messages", "anthropic", nil); err != nil {
+	if _, err := pool.AddChannel("anthropic-ch", "ant", "https://api.anthropic.com/v1/messages", "https://anthropic.com", "anthropic", nil); err != nil {
 		t.Fatalf("AddChannel() error = %v", err)
 	}
 	ch2, _ := pool.GetChannelByPrefix("ant")

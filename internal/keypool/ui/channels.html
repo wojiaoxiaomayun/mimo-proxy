@@ -101,6 +101,11 @@
                     <input type="text" id="chBaseURL" placeholder="https://api.xiaomimimo.com/v1/chat/completions" style="width:100%;">
                 </div>
                 <div class="field-group" style="margin-top:1rem;">
+                    <label>原网站URL</label>
+                    <input type="text" id="chWebsiteURL" placeholder="https://xiaomimimo.com" style="width:100%;">
+                    <div class="field-hint">原供应商网站地址（点击跳转到该网站）</div>
+                </div>
+                <div class="field-group" style="margin-top:1rem;">
                     <label>渠道类型</label>
                     <select id="chChannelType" style="width:100%;">
                         <option value="openai">OpenAI — /v1/chat/completions 兼容格式</option>
@@ -139,7 +144,11 @@
                     <div id="allowedModelsGrid" style="max-height:200px;overflow-y:auto;border:1px solid hsl(var(--border));border-radius:var(--radius);padding:0.5rem;background:hsl(var(--background));">
                         <div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));padding:0.5rem;">请先输入 API Key 并刷新模型列表</div>
                     </div>
-                    <div class="field-hint">不选任何模型 = 允许所有模型；选择后此渠道只接受选中的模型</div>
+                    <div style="margin-top:0.75rem;display:flex;gap:0.5rem;align-items:center;">
+                        <input type="text" id="manualModelInput" placeholder="手动输入模型名称" style="flex:1;" onkeydown="if(event.key==='Enter')addManualModel()">
+                        <button class="btn btn-outline btn-sm" onclick="addManualModel()">添加</button>
+                    </div>
+                    <div class="field-hint">不选任何模型 = 允许所有模型；选择后此渠道只接受选中的模型。如果无法获取模型列表，可以手动输入。</div>
                 </div>
                 <div style="margin-top:1.25rem;display:flex;gap:0.5rem;">
                     <button class="btn btn-outline" onclick="closeAddChannelModal()" style="flex:1;">取消</button>
@@ -184,24 +193,19 @@
                     ? '<span class="badge" style="background:hsl(262 84.2% 60.2%);color:white;">Anthropic</span>'
                     : '<span class="badge" style="background:hsl(var(--muted));color:hsl(var(--muted-foreground));">OpenAI</span>';
                 const proxyBase = location.origin + '/c/' + c.prefix;
-                let proxyUrl, proxyUrlDisplay;
-                if (c.channel_type === 'anthropic') {
-                    proxyUrl = proxyBase + '/v1/messages';
-                    proxyUrlDisplay = `<div style="font-family:monospace;font-size:0.8125rem;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${proxyUrl}">${proxyUrl}</div>`;
-                } else {
-                    proxyUrl = proxyBase + '/v1/chat/completions';
-                    proxyUrlDisplay = `<div style="font-family:monospace;font-size:0.8125rem;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${proxyUrl}">${proxyUrl}</div>`;
-                }
+                const websiteURL = c.website_url || '';
+                const websiteDisplay = websiteURL
+                    ? `<a href="${escapeHtml(websiteURL)}" target="_blank" rel="noopener" style="color:hsl(217 91% 60%);text-decoration:none;font-family:monospace;font-size:0.8125rem;max-width:260px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;" title="${escapeHtml(websiteURL)}" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${escapeHtml(websiteURL)}</a>
+                       <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle;margin-left:0.25rem;color:hsl(var(--muted-foreground));"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h10v10M7 17L17 7"/></svg>`
+                    : '<span style="color:hsl(var(--muted-foreground));">-</span>';
                 rows += `<tr>
                     <td style="font-weight:500;">${c.name || '-'}</td>
                     <td style="font-family:monospace;font-size:0.8125rem;"><code>/c/${c.prefix}</code></td>
                     <td>${typeLabel}</td>
-                    <td class="td-key" title="${c.base_url}" style="max-width:260px;">${c.base_url}</td>
-                    <td>${proxyUrlDisplay}</td>
+                    <td style="max-width:280px;">${websiteDisplay}</td>
                     <td>${modeLabel}</td>
                     <td>${badge}</td>
                     <td class="td-actions"><div class="btn-group">
-                        <button class="btn btn-sm btn-ghost" data-tip="复制代理URL" onclick="copyProxyUrl('${proxyUrl}')">${ICO.copy}</button>
                         <button class="btn btn-sm btn-ghost" data-tip="编辑" onclick='openEditChannelModal(${JSON.stringify(c).replace(/'/g,"&#39;")})'>${ICO.pencil}</button>
                         ${toggle}
                         <button class="btn btn-sm btn-ghost" data-tip="删除" style="color:hsl(var(--destructive))" onclick="removeChannel(${c.id})">${ICO.trash}</button>
@@ -209,8 +213,18 @@
                 </tr>`;
             }
             grid.innerHTML = `<div class="table-wrapper"><table><thead><tr>
-                <th>名称</th><th>前缀</th><th>类型</th><th>上游 URL</th><th>代理 URL</th><th>模式</th><th>状态</th><th style="text-align:right">操作</th>
+                <th>名称</th><th>前缀</th><th>类型</th><th>原网站</th><th>模式</th><th>状态</th><th style="text-align:right">操作</th>
             </tr></thead><tbody>${rows}</tbody></table></div>`;
+        }
+
+        function escapeHtml(s) {
+            if (s == null) return '';
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         function copyProxyUrl(url) {
@@ -223,22 +237,46 @@
             navigator.clipboard.writeText(url).then(() => showToast('已复制 ' + (type === 'anthropic' ? 'Anthropic' : 'OpenAI') + ' Base URL: ' + url));
         }
 
+        // Store manually added models
+        let manualModels = [];
+
         function populateAllowedModelsGrid(models, savedModels) {
             const grid = document.getElementById('allowedModelsGrid');
-            if (!models || models.length === 0) {
-                grid.innerHTML = '<div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));padding:0.5rem;">未获取到模型</div>';
+            // Combine fetched models with saved models and manual models
+            const allModels = new Set([...(models || []), ...(savedModels || []), ...manualModels]);
+            if (allModels.size === 0) {
+                grid.innerHTML = '<div style="font-size:0.8125rem;color:hsl(var(--muted-foreground));padding:0.5rem;">未获取到模型，请手动输入模型名称</div>';
                 return;
             }
             const saved = new Set(savedModels || []);
             let html = '';
-            for (const m of models) {
+            for (const m of allModels) {
                 const checked = saved.has(m) ? ' checked' : '';
+                const isManual = manualModels.includes(m);
                 html += `<label class="allowed-model-item" style="display:flex;align-items:center;gap:0.5rem;padding:0.375rem 0.5rem;cursor:pointer;border-radius:var(--radius);font-size:0.8125rem;" onmouseover="this.style.background='hsl(var(--muted))'" onmouseout="this.style.background='transparent'">
                     <input type="checkbox" class="allowed-model-cb" value="${m}"${checked}>
                     <span>${m}</span>
+                    ${isManual ? '<span class="badge" style="font-size:0.625rem;background:hsl(var(--muted));color:hsl(var(--muted-foreground));">手动</span>' : ''}
                 </label>`;
             }
             grid.innerHTML = html;
+        }
+
+        function addManualModel() {
+            const input = document.getElementById('manualModelInput');
+            const modelName = input.value.trim();
+            if (!modelName) { input.focus(); return; }
+            if (manualModels.includes(modelName)) { showToast('模型已存在', true); return; }
+            manualModels.push(modelName);
+            input.value = '';
+            // Get currently checked models
+            const prevChecked = new Set();
+            document.querySelectorAll('#allowedModelsGrid .allowed-model-cb:checked').forEach(cb => prevChecked.add(cb.value));
+            try { JSON.parse(document.getElementById('chEditAllowedModelsSaved').value || '[]').forEach(m => prevChecked.add(m)); } catch(_){}
+            // Also add the new model to checked
+            prevChecked.add(modelName);
+            populateAllowedModelsGrid([], [...prevChecked]);
+            showToast('已添加模型: ' + modelName);
         }
 
         function maskKey(key) {
@@ -372,6 +410,7 @@
             document.getElementById('chName').value = '';
             document.getElementById('chPrefix').value = '';
             document.getElementById('chBaseURL').value = '';
+            document.getElementById('chWebsiteURL').value = '';
             document.getElementById('chChannelType').value = 'openai';
             document.getElementById('chKeyMode').value = 'round-robin';
             document.getElementById('chApiKey').value = '';
@@ -394,6 +433,7 @@
             document.getElementById('chName').value = c.name || '';
             document.getElementById('chPrefix').value = c.prefix || '';
             document.getElementById('chBaseURL').value = c.base_url || '';
+            document.getElementById('chWebsiteURL').value = c.website_url || '';
             document.getElementById('chChannelType').value = c.channel_type || 'openai';
             document.getElementById('chKeyMode').value = c.key_mode || 'round-robin';
             document.getElementById('chApiKey').value = '';
@@ -465,6 +505,7 @@
             const name = document.getElementById('chName').value.trim();
             const prefix = document.getElementById('chPrefix').value.trim();
             const base_url = document.getElementById('chBaseURL').value.trim();
+            const website_url = document.getElementById('chWebsiteURL').value.trim();
             const channel_type = document.getElementById('chChannelType').value;
             const key_mode = document.getElementById('chKeyMode').value;
             const editId = document.getElementById('chEditId').value;
@@ -475,7 +516,7 @@
             if (!base_url) { document.getElementById('chBaseURL').focus(); return; }
             try {
                 const action = editId ? 'update' : 'add';
-                const body = {action, name, prefix, base_url, channel_type, key_mode, allowed_models};
+                const body = {action, name, prefix, base_url, website_url, channel_type, key_mode, allowed_models};
                 if (editId) body.id = parseInt(editId);
                 const res = await fetch(API_BASE + '/channels', {
                     method: 'POST', headers: {'Content-Type':'application/json'},
