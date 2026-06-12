@@ -43,6 +43,17 @@ function formatDate(dateStr) {
     return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
+// escapeHtml escapes a value for safe inclusion in HTML text content.
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function showToast(msg, isError) {
     const t = document.getElementById('toast');
     t.textContent = msg;

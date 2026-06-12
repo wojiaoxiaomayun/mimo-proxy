@@ -236,7 +236,10 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	h.prepareUpstreamRequest(req)
 
-	client := h.upstreamClient(120 * time.Second)
+	client, cerr := h.upstreamClientForChannel(channel, 120*time.Second)
+	if cerr != nil {
+		log.Printf("[proxy] fallback to direct: %v", cerr)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		h.recordKeyFailure(key)
@@ -519,7 +522,10 @@ func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 	}
 	h.prepareUpstreamRequest(proxyReq)
 
-	client := h.upstreamClient(30 * time.Second)
+	client, cerr := h.upstreamClientForChannel(channel, 30*time.Second)
+	if cerr != nil {
+		log.Printf("[proxy] fallback to direct: %v", cerr)
+	}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		http.Error(w, "Request failed: "+err.Error(), http.StatusBadGateway)
@@ -627,7 +633,9 @@ func (h *Handler) refreshModelsWithType(channelID int, modelsURL string, key str
 	req.Header.Set("Authorization", "Bearer "+key)
 	h.prepareUpstreamRequest(req)
 
-	client := h.upstreamClient(10 * time.Second)
+	// Look up the channel so its proxy is honored.
+	channel, _ := h.pool.GetChannelByID(channelID)
+	client, _ := h.upstreamClientForChannel(channel, 10*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil
@@ -824,7 +832,7 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+key)
 	h.prepareUpstreamRequest(req)
 
-	client := h.upstreamClient(15 * time.Second)
+	client, _ := h.upstreamClientForChannel(channel, 15*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "Failed to fetch models: "+err.Error(), http.StatusBadGateway)
@@ -898,7 +906,7 @@ func (h *Handler) V1Models(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+key)
 	h.prepareUpstreamRequest(req)
 
-	client := h.upstreamClient(15 * time.Second)
+	client, _ := h.upstreamClientForChannel(channel, 15*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, `{"error":{"message":"Upstream request failed: `+err.Error()+`","code":"502"}}`, http.StatusBadGateway)
@@ -1015,7 +1023,7 @@ func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channel
 		req.Header.Set("Authorization", "Bearer "+key)
 		h.prepareUpstreamRequest(req)
 
-		client := h.upstreamClient(10 * time.Second)
+		client, _ := h.upstreamClientForChannel(&ch, 10*time.Second)
 		resp, err := client.Do(req)
 		if err != nil {
 			continue
@@ -1266,7 +1274,10 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	h.prepareUpstreamRequest(proxyReq)
 
-	client := h.upstreamClient(30 * time.Second)
+	client, cerr := h.upstreamClientForChannel(channel, 30*time.Second)
+	if cerr != nil {
+		log.Printf("[proxy] fallback to direct: %v", cerr)
+	}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		http.Error(w, `{"error":"Request failed: `+err.Error()+`"}`, http.StatusBadGateway)
@@ -1357,6 +1368,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			BaseURL       string   `json:"base_url"`
 			WebsiteURL    string   `json:"website_url"`
 			ChannelType   string   `json:"channel_type"`
+			ProxyURL      string   `json:"proxy_url"`
 			KeyMode       string   `json:"key_mode"`
 			AllowedModels []string `json:"allowed_models"`
 		}
@@ -1367,7 +1379,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 
 		switch req.Action {
 		case "add":
-			id, err := h.pool.AddChannel(req.Name, req.Prefix, req.BaseURL, req.WebsiteURL, req.ChannelType, req.AllowedModels)
+			id, err := h.pool.AddChannel(req.Name, req.Prefix, req.BaseURL, req.WebsiteURL, req.ChannelType, req.ProxyURL, req.AllowedModels)
 			if err != nil {
 				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 				return
@@ -1377,7 +1389,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			}
 			json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "id": id})
 		case "update":
-			if err := h.pool.UpdateChannel(req.ID, req.Name, req.Prefix, req.BaseURL, req.WebsiteURL, req.ChannelType, req.AllowedModels); err != nil {
+			if err := h.pool.UpdateChannel(req.ID, req.Name, req.Prefix, req.BaseURL, req.WebsiteURL, req.ChannelType, req.ProxyURL, req.AllowedModels); err != nil {
 				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 				return
 			}
@@ -1527,7 +1539,7 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 			testReq.Header.Set("Authorization", "Bearer "+k.Key)
 			h.prepareUpstreamRequest(testReq)
 
-			client := h.upstreamClient(15 * time.Second)
+			client, _ := h.upstreamClientForChannel(ch, 15*time.Second)
 			resp, err := client.Do(testReq)
 			if err != nil {
 				fails++
@@ -1675,7 +1687,10 @@ func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 
 	h.prepareUpstreamRequest(req)
 
-	client := h.upstreamClient(120 * time.Second)
+	client, cerr := h.upstreamClientForChannel(channel, 120*time.Second)
+	if cerr != nil {
+		log.Printf("[proxy] fallback to direct: %v", cerr)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		h.recordKeyFailure(key)
@@ -1832,7 +1847,10 @@ func (h *Handler) MessagesCountTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	h.prepareUpstreamRequest(req)
 
-	client := h.upstreamClient(30 * time.Second)
+	client, cerr := h.upstreamClientForChannel(channel, 30*time.Second)
+	if cerr != nil {
+		log.Printf("[proxy] fallback to direct: %v", cerr)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, `{"type":"error","error":{"type":"api_error","message":"Upstream request failed: `+err.Error()+`"}}`, http.StatusBadGateway)

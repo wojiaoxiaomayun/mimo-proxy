@@ -33,6 +33,7 @@ type ChannelInfo struct {
 	BaseURL       string   `json:"base_url"`
 	WebsiteURL    string   `json:"website_url"`
 	ChannelType   string   `json:"channel_type"` // "openai" or "anthropic"
+	ProxyURL      string   `json:"proxy_url"`    // optional upstream proxy, empty = no proxy
 	Enabled       bool     `json:"enabled"`
 	IsDefault     bool     `json:"is_default"`
 	PinnedKey     string   `json:"pinned_key"`
@@ -136,6 +137,7 @@ func New(dbPath, defaultURL string) (*KeyPool, error) {
 		"ALTER TABLE request_logs ADD COLUMN response_body TEXT DEFAULT ''",
 		"ALTER TABLE channels ADD COLUMN allowed_models TEXT DEFAULT '[]'",
 		"ALTER TABLE channels ADD COLUMN website_url TEXT DEFAULT ''",
+		"ALTER TABLE channels ADD COLUMN proxy_url TEXT DEFAULT ''",
 	} {
 		db.Exec(col) // ignore duplicate-column errors
 	}
@@ -581,19 +583,20 @@ func (p *KeyPool) ImportBackup(backup *BackupData) (*ImportSummary, error) {
 
 		amJSON, _ := json.Marshal(channel.AllowedModels)
 		_, err := tx.Exec(`
-			INSERT INTO channels (name, prefix, base_url, website_url, channel_type, enabled, is_default, pinned_key, key_mode, allowed_models, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO channels (name, prefix, base_url, website_url, channel_type, proxy_url, enabled, is_default, pinned_key, key_mode, allowed_models, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(prefix) DO UPDATE SET
 				name = excluded.name,
 				base_url = excluded.base_url,
 				website_url = excluded.website_url,
 				channel_type = excluded.channel_type,
+				proxy_url = excluded.proxy_url,
 				enabled = excluded.enabled,
 				is_default = excluded.is_default,
 				pinned_key = excluded.pinned_key,
 				key_mode = excluded.key_mode,
 				allowed_models = excluded.allowed_models
-		`, channel.Name, prefix, channel.BaseURL, channel.WebsiteURL, channelType, boolToInt(channel.Enabled), boolToInt(isDefault), channel.PinnedKey, keyMode, string(amJSON), defaultCreatedAt(channel.CreatedAt))
+		`, channel.Name, prefix, channel.BaseURL, channel.WebsiteURL, channelType, channel.ProxyURL, boolToInt(channel.Enabled), boolToInt(isDefault), channel.PinnedKey, keyMode, string(amJSON), defaultCreatedAt(channel.CreatedAt))
 		if err != nil {
 			return nil, err
 		}
@@ -707,7 +710,7 @@ func (p *KeyPool) GetAllChannels() ([]ChannelInfo, error) {
 }
 
 func (p *KeyPool) queryChannels() ([]ChannelInfo, error) {
-	rows, err := p.db.Query(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels ORDER BY is_default DESC, id`)
+	rows, err := p.db.Query(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), COALESCE(proxy_url,''), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels ORDER BY is_default DESC, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -716,7 +719,7 @@ func (p *KeyPool) queryChannels() ([]ChannelInfo, error) {
 	for rows.Next() {
 		var c ChannelInfo
 		var amStr string
-		if err := rows.Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.ProxyURL, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		json.Unmarshal([]byte(amStr), &c.AllowedModels)
@@ -751,7 +754,7 @@ func (p *KeyPool) GetChannelByPrefix(prefix string) (*ChannelInfo, error) {
 	defer p.mu.RUnlock()
 	var c ChannelInfo
 	var amStr string
-	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels WHERE prefix = ? AND enabled = 1`, prefix).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt)
+	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), COALESCE(proxy_url,''), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels WHERE prefix = ? AND enabled = 1`, prefix).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.ProxyURL, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -764,10 +767,10 @@ func (p *KeyPool) GetDefaultChannel() (*ChannelInfo, error) {
 	defer p.mu.RUnlock()
 	var c ChannelInfo
 	var amStr string
-	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels WHERE is_default = 1 AND enabled = 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt)
+	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), COALESCE(proxy_url,''), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels WHERE is_default = 1 AND enabled = 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.ProxyURL, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt)
 	if err != nil {
 		// Fallback: first enabled channel
-		err = p.db.QueryRow(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels WHERE enabled = 1 ORDER BY id LIMIT 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt)
+		err = p.db.QueryRow(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), COALESCE(proxy_url,''), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels WHERE enabled = 1 ORDER BY id LIMIT 1`).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.ProxyURL, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt)
 	}
 	if err != nil {
 		return nil, err
@@ -781,7 +784,7 @@ func (p *KeyPool) GetChannelByID(id int) (*ChannelInfo, error) {
 	defer p.mu.RUnlock()
 	var c ChannelInfo
 	var amStr string
-	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels WHERE id = ?`, id).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt)
+	err := p.db.QueryRow(`SELECT id, name, prefix, base_url, COALESCE(website_url,''), COALESCE(channel_type,'openai'), COALESCE(proxy_url,''), enabled, is_default, COALESCE(pinned_key,''), COALESCE(key_mode,'round-robin'), COALESCE(allowed_models,'[]'), created_at FROM channels WHERE id = ?`, id).Scan(&c.ID, &c.Name, &c.Prefix, &c.BaseURL, &c.WebsiteURL, &c.ChannelType, &c.ProxyURL, &c.Enabled, &c.IsDefault, &c.PinnedKey, &c.KeyMode, &amStr, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -789,7 +792,7 @@ func (p *KeyPool) GetChannelByID(id int) (*ChannelInfo, error) {
 	return &c, nil
 }
 
-func (p *KeyPool) AddChannel(name, prefix, baseURL, websiteURL, channelType string, allowedModels []string) (int, error) {
+func (p *KeyPool) AddChannel(name, prefix, baseURL, websiteURL, channelType, proxyURL string, allowedModels []string) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if prefix == "" {
@@ -799,7 +802,7 @@ func (p *KeyPool) AddChannel(name, prefix, baseURL, websiteURL, channelType stri
 		channelType = "openai"
 	}
 	amJSON, _ := json.Marshal(allowedModels)
-	res, err := p.db.Exec(`INSERT INTO channels (name, prefix, base_url, website_url, channel_type, allowed_models) VALUES (?, ?, ?, ?, ?, ?)`, name, prefix, baseURL, websiteURL, channelType, string(amJSON))
+	res, err := p.db.Exec(`INSERT INTO channels (name, prefix, base_url, website_url, channel_type, proxy_url, allowed_models) VALUES (?, ?, ?, ?, ?, ?, ?)`, name, prefix, baseURL, websiteURL, channelType, strings.TrimSpace(proxyURL), string(amJSON))
 	if err != nil {
 		return 0, err
 	}
@@ -818,7 +821,7 @@ func (p *KeyPool) SetDefaultChannel(id int) error {
 	return err
 }
 
-func (p *KeyPool) UpdateChannel(id int, name, prefix, baseURL, websiteURL, channelType string, allowedModels []string) error {
+func (p *KeyPool) UpdateChannel(id int, name, prefix, baseURL, websiteURL, channelType, proxyURL string, allowedModels []string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if prefix == "" {
@@ -828,7 +831,7 @@ func (p *KeyPool) UpdateChannel(id int, name, prefix, baseURL, websiteURL, chann
 		channelType = "openai"
 	}
 	amJSON, _ := json.Marshal(allowedModels)
-	_, err := p.db.Exec(`UPDATE channels SET name = ?, prefix = ?, base_url = ?, website_url = ?, channel_type = ?, allowed_models = ? WHERE id = ?`, name, prefix, baseURL, websiteURL, channelType, string(amJSON), id)
+	_, err := p.db.Exec(`UPDATE channels SET name = ?, prefix = ?, base_url = ?, website_url = ?, channel_type = ?, proxy_url = ?, allowed_models = ? WHERE id = ?`, name, prefix, baseURL, websiteURL, channelType, strings.TrimSpace(proxyURL), string(amJSON), id)
 	return err
 }
 
@@ -1083,7 +1086,9 @@ func (p *KeyPool) GetLogDetail(id int) (*RequestLog, error) {
 }
 
 // ============ Settings ============
-// Silently ignores errors (e.g. table not yet created).
+// GetSetting returns the value for the given setting key, or defaultValue if
+// the key is missing or the stored value is empty. Silently ignores errors
+// (e.g. table not yet created).
 func (p *KeyPool) GetSetting(key, defaultValue string) string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

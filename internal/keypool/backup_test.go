@@ -20,6 +20,7 @@ func TestImportBackupRestoresConfig(t *testing.T) {
 				Name:      "Imported",
 				Prefix:    "imported",
 				BaseURL:   "https://api.example.com/openai/v1/chat/completions",
+				ProxyURL:  "http://user:pass@127.0.0.1:8080",
 				Enabled:   true,
 				IsDefault: true,
 				PinnedKey: "upstream-key",
@@ -88,6 +89,9 @@ func TestImportBackupRestoresConfig(t *testing.T) {
 	}
 	if !importedChannel.IsDefault || importedChannel.KeyMode != "failover" || importedChannel.PinnedKey != "upstream-key" {
 		t.Fatalf("imported channel = %+v", *importedChannel)
+	}
+	if importedChannel.ProxyURL != "http://user:pass@127.0.0.1:8080" {
+		t.Fatalf("imported channel proxy_url = %q", importedChannel.ProxyURL)
 	}
 
 	var importedKey *KeyInfo
