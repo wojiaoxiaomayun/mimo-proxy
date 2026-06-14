@@ -50,6 +50,61 @@ func testMessagesPayload(model string) []byte {
 	return b
 }
 
+// writeJSON sets the JSON content type and writes a pre-built payload.
+func writeJSON(w http.ResponseWriter, status int, payload []byte) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	w.Write(payload)
+}
+
+// writeJSONError encodes a management-API style error:
+//
+//	{"error":"<msg>"}
+//
+// It uses json.Marshal so the message is always valid JSON regardless of any
+// quotes or newlines inside err.Error() (mitigates the string-concat injection
+// / corruption issue flagged in OPTIMIZATION.md #2).
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	b, _ := json.Marshal(map[string]string{"error": msg})
+	writeJSON(w, status, b)
+}
+
+// writeOpenAIError encodes an OpenAI-compatible error response:
+//
+//	{"error":{"message":"<msg>","type":"<errType>","code":"<code>"}}
+//
+// code is optional (pass "" to omit). type/code default to "api_error"/"".
+func writeOpenAIError(w http.ResponseWriter, status int, msg, errType, code string) {
+	if errType == "" {
+		errType = "api_error"
+	}
+	body := map[string]interface{}{
+		"message": msg,
+		"type":    errType,
+	}
+	if code != "" {
+		body["code"] = code
+	}
+	b, _ := json.Marshal(map[string]interface{}{"error": body})
+	writeJSON(w, status, b)
+}
+
+// writeAnthropicError encodes an Anthropic-compatible error response:
+//
+//	{"type":"error","error":{"type":"<errType>","message":"<msg>"}}
+//
+// errType defaults to "api_error".
+func writeAnthropicError(w http.ResponseWriter, status int, msg, errType string) {
+	if errType == "" {
+		errType = "api_error"
+	}
+	b, _ := json.Marshal(map[string]interface{}{
+		"type":  "error",
+		"error": map[string]string{"type": errType, "message": msg},
+	})
+	writeJSON(w, status, b)
+}
+
 //go:embed ui/*
 var uiEmbed embed.FS
 
@@ -176,7 +231,7 @@ func (h *Handler) serveUIPage(w http.ResponseWriter, path string) {
 
 func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "Only POST method is allowed", "invalid_request_error", "405")
 		return
 	}
 
@@ -192,13 +247,13 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		writeOpenAIError(w, http.StatusBadRequest, "Failed to read request body", "invalid_request_error", "400")
 		return
 	}
 
 	channel, err := h.resolveChannel(r)
 	if err != nil {
-		http.Error(w, `{"error":{"message":"Channel not found","code":"404"}}`, http.StatusNotFound)
+		writeOpenAIError(w, http.StatusNotFound, "Channel not found", "invalid_request_error", "404")
 		return
 	}
 
@@ -217,14 +272,14 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if mm := h.pool.GetModelMappingByName(originalModel); mm != nil && !mm.Enabled {
 		// Model name matches a disabled mapping — return error directly.
-		http.Error(w, fmt.Sprintf(`{"error":{"message":"Model mapping '%s' is disabled","type":"invalid_request_error","code":"mapping_disabled"}}`, originalModel), http.StatusBadRequest)
+		writeOpenAIError(w, http.StatusBadRequest, fmt.Sprintf("Model mapping '%s' is disabled", originalModel), "invalid_request_error", "mapping_disabled")
 		return
 	}
 	log.Printf("[chat] originalModel=%s mappedModel=%s channel=%s(%d) modelMapped=%v", originalModel, mappedModelName, channel.Name, channel.ID, modelMapped)
 
 	key, defaultModel, err := h.pool.GetKey(channel.ID)
 	if err != nil {
-		http.Error(w, "No API key available: "+err.Error(), http.StatusServiceUnavailable)
+		writeOpenAIError(w, http.StatusServiceUnavailable, "No API key available: "+err.Error(), "api_error", "503")
 		return
 	}
 
@@ -237,7 +292,7 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	req, err := http.NewRequest(http.MethodPost, chatCompletionsURLFromBase(channel.BaseURL), bytes.NewReader(body))
 	if err != nil {
-		http.Error(w, "Failed to create request", http.StatusInternalServerError)
+		writeOpenAIError(w, http.StatusInternalServerError, "Failed to create request", "api_error", "500")
 		return
 	}
 
@@ -259,7 +314,7 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	resp, err := client.Do(req)
 	if err != nil {
 		h.recordKeyFailure(key)
-		http.Error(w, "Failed to proxy request: "+err.Error(), http.StatusBadGateway)
+		writeOpenAIError(w, http.StatusBadGateway, "Failed to proxy request: "+err.Error(), "api_error", "502")
 		return
 	}
 	defer resp.Body.Close()
@@ -382,7 +437,7 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(r.URL.Query().Get("channel"), "%d", &channelID)
 		keys, err := h.pool.GetAll(channelID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		// Build channel lookup map for enriched response.
@@ -440,8 +495,8 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 			DefaultModel string `json:"default_model"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body")
+		return
 		}
 
 		var err error
@@ -465,12 +520,12 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 		case "unpin-key":
 			err = h.pool.UnpinKey(req.ChannelID)
 		default:
-			http.Error(w, fmt.Sprintf("Unknown action: %s", req.Action), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Unknown action: %s", req.Action))
 			return
 		}
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
@@ -479,26 +534,26 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 }
 
 // ChannelAPIKeys handles POST /api/channels/{id}/keys for external programs to add API keys.
 func (h *Handler) ChannelAPIKeys(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"error":"Only POST method is allowed"}`, http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
 
 	idStr := r.PathValue("id")
 	var channelID int
 	if _, err := fmt.Sscanf(idStr, "%d", &channelID); err != nil || channelID <= 0 {
-		http.Error(w, `{"error":"Invalid channel ID"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid channel ID")
 		return
 	}
 
 	// Verify channel exists.
 	if _, err := h.pool.GetChannelByID(channelID); err != nil {
-		http.Error(w, `{"error":"Channel not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "Channel not found")
 		return
 	}
 
@@ -508,16 +563,16 @@ func (h *Handler) ChannelAPIKeys(w http.ResponseWriter, r *http.Request) {
 		DefaultModel string `json:"default_model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"Invalid JSON body"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if req.Key == "" {
-		http.Error(w, `{"error":"key is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "key is required")
 		return
 	}
 
 	if err := h.pool.Add(req.Key, req.Note, channelID, req.DefaultModel); err != nil {
-		http.Error(w, `{"error":"`+strings.ReplaceAll(err.Error(), `"`, `\"`)+`"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -531,7 +586,7 @@ func (h *Handler) ChannelAPIKeys(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
 
@@ -541,7 +596,7 @@ func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 		ChannelID int    `json:"channel_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Key == "" {
-		http.Error(w, "Missing or invalid key", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Missing or invalid key")
 		return
 	}
 
@@ -560,7 +615,7 @@ func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 		channel, _ = h.pool.GetDefaultChannel()
 	}
 	if channel == nil {
-		http.Error(w, `{"error":"No channel configured"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "No channel configured")
 		return
 	}
 
@@ -573,7 +628,7 @@ func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 	}
 	proxyReq, err := http.NewRequest(http.MethodPost, testURL, bytes.NewReader(testBody))
 	if err != nil {
-		http.Error(w, "Failed to create request", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to create request")
 		return
 	}
 	proxyReq.Header.Set("Content-Type", "application/json")
@@ -592,7 +647,7 @@ func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
-		http.Error(w, "Request failed: "+err.Error(), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "Request failed: "+err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -849,7 +904,7 @@ func replaceModel(body []byte, newModel string) []byte {
 
 func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Only GET method is allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
 		return
 	}
 
@@ -859,7 +914,7 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	baseURL := strings.TrimSpace(r.URL.Query().Get("base_url"))
 
 	if key == "" {
-		http.Error(w, `{"error":"Missing key parameter"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Missing key parameter")
 		return
 	}
 
@@ -879,7 +934,7 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 			channel, _ = h.pool.GetDefaultChannel()
 		}
 		if channel == nil {
-			http.Error(w, `{"error":"No channel found"}`, http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, "No channel found")
 			return
 		}
 		baseURL = channel.BaseURL
@@ -889,7 +944,7 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 
 	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
 	if err != nil {
-		http.Error(w, "Failed to create request", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to create request")
 		return
 	}
 	// /v1/models is OpenAI-compatible for all channel types, always use Bearer auth.
@@ -899,7 +954,7 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	client, _ := h.upstreamClientForChannel(channel, 15*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
-		http.Error(w, "Failed to fetch models: "+err.Error(), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "Failed to fetch models: "+err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -933,7 +988,7 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 // This is the OpenAI-compatible endpoint that SDKs call via client.models.list().
 func (h *Handler) V1Models(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":{"message":"Method not allowed","code":"405"}}`, http.StatusMethodNotAllowed)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "Method not allowed", "invalid_request_error", "405")
 		return
 	}
 
@@ -947,13 +1002,13 @@ func (h *Handler) V1Models(w http.ResponseWriter, r *http.Request) {
 
 	channel, err := h.resolveChannel(r)
 	if err != nil {
-		http.Error(w, `{"error":{"message":"Channel not found","code":"404"}}`, http.StatusNotFound)
+		writeOpenAIError(w, http.StatusNotFound, "Channel not found", "invalid_request_error", "404")
 		return
 	}
 
 	key, _, err := h.pool.GetKey(channel.ID)
 	if err != nil {
-		http.Error(w, `{"error":{"message":"No API key available: `+err.Error()+`","code":"503"}}`, http.StatusServiceUnavailable)
+		writeOpenAIError(w, http.StatusServiceUnavailable, "No API key available: "+err.Error(), "api_error", "503")
 		return
 	}
 
@@ -963,7 +1018,7 @@ func (h *Handler) V1Models(w http.ResponseWriter, r *http.Request) {
 
 	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
 	if err != nil {
-		http.Error(w, `{"error":{"message":"Failed to create request","code":"500"}}`, http.StatusInternalServerError)
+		writeOpenAIError(w, http.StatusInternalServerError, "Failed to create request", "api_error", "500")
 		return
 	}
 	// /v1/models is OpenAI-compatible for all channel types, always use Bearer auth.
@@ -973,7 +1028,7 @@ func (h *Handler) V1Models(w http.ResponseWriter, r *http.Request) {
 	client, _ := h.upstreamClientForChannel(channel, 15*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
-		http.Error(w, `{"error":{"message":"Upstream request failed: `+err.Error()+`","code":"502"}}`, http.StatusBadGateway)
+		writeOpenAIError(w, http.StatusBadGateway, "Upstream request failed: "+err.Error(), "api_error", "502")
 		return
 	}
 	defer resp.Body.Close()
@@ -1033,7 +1088,7 @@ func (h *Handler) V1ModelsAnthropic(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channelType string) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":{"message":"Method not allowed","code":"405"}}`, http.StatusMethodNotAllowed)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "Method not allowed", "invalid_request_error", "405")
 		return
 	}
 	if !h.validateProxyAuth(r) {
@@ -1160,7 +1215,7 @@ func (h *Handler) ProxyKeys(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		keys, err := h.pool.GetAllProxyKeys()
 		if err != nil {
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"keys": keys})
@@ -1172,7 +1227,7 @@ func (h *Handler) ProxyKeys(w http.ResponseWriter, r *http.Request) {
 			Note   string `json:"note"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Invalid request")
 			return
 		}
 
@@ -1180,38 +1235,38 @@ func (h *Handler) ProxyKeys(w http.ResponseWriter, r *http.Request) {
 		case "generate":
 			key, err := h.pool.GenerateProxyKey(req.Note)
 			if err != nil {
-				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "key": key})
 
 		case "remove":
 			if err := h.pool.RemoveProxyKey(req.Key); err != nil {
-				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 
 		case "enable":
 			if err := h.pool.EnableProxyKey(req.Key); err != nil {
-				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 
 		case "disable":
 			if err := h.pool.DisableProxyKey(req.Key); err != nil {
-				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 
 		default:
-			http.Error(w, `{"error":"Unknown action"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Unknown action")
 		}
 
 	default:
-		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }
 
@@ -1222,7 +1277,7 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		mappings, err := h.pool.GetAllModelMappings()
 		if err != nil {
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"mappings": mappings})
@@ -1241,7 +1296,7 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 			TargetModel string `json:"target_model"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Invalid request")
 			return
 		}
 
@@ -1266,23 +1321,23 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 		case "get":
 			m, gerr := h.pool.GetModelMappingByID(req.ID)
 			if gerr != nil {
-				http.Error(w, `{"error":"`+gerr.Error()+`"}`, http.StatusNotFound)
+				writeJSONError(w, http.StatusNotFound, gerr.Error())
 				return
 			}
 			json.NewEncoder(w).Encode(m)
 			return
 		default:
-			http.Error(w, `{"error":"Unknown action"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Unknown action")
 			return
 		}
 		if err != nil {
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 
 	default:
-		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }
 
@@ -1290,7 +1345,7 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 // verifying the mapping is reachable and the target model exists.
 func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
 
@@ -1300,7 +1355,7 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 		TargetModel string `json:"target_model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
 
@@ -1321,7 +1376,7 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.ChannelID == 0 {
-		http.Error(w, `{"error":"Channel not found"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Channel not found")
 		return
 	}
 
@@ -1335,14 +1390,14 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if channel == nil {
-		http.Error(w, `{"error":"Channel not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "Channel not found")
 		return
 	}
 
 	// Get a key for this channel
 	key, _, err := h.pool.GetKey(channel.ID)
 	if err != nil || key == "" {
-		http.Error(w, `{"error":"No available key for channel"}`, http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "No available key for channel")
 		return
 	}
 
@@ -1357,7 +1412,7 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 
 	proxyReq, err := http.NewRequest(http.MethodPost, testURL, bytes.NewReader(testBody))
 	if err != nil {
-		http.Error(w, `{"error":"Failed to create request"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to create request")
 		return
 	}
 	proxyReq.Header.Set("Content-Type", "application/json")
@@ -1376,7 +1431,7 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
-		http.Error(w, `{"error":"Request failed: `+err.Error()+`"}`, http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "Request failed: "+err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -1407,7 +1462,7 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Only GET method is allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
 		return
 	}
 
@@ -1417,7 +1472,7 @@ func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(idStr, "%d", &id)
 		log, err := h.pool.GetLogDetail(id)
 		if err != nil {
-			http.Error(w, `{"error":"Log not found"}`, http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, "Log not found")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -1432,7 +1487,7 @@ func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 	}
 	logs, total, err := h.pool.GetLogs(page, 10)
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1450,7 +1505,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		channels, err := h.pool.GetAllChannels()
 		if err != nil {
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"channels": channels})
@@ -1469,7 +1524,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			AllowedModels []string `json:"allowed_models"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Invalid request")
 			return
 		}
 
@@ -1477,7 +1532,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 		case "add":
 			id, err := h.pool.AddChannel(req.Name, req.Prefix, req.BaseURL, req.WebsiteURL, req.ChannelType, req.ProxyURL, req.AllowedModels)
 			if err != nil {
-				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			if req.KeyMode != "" && req.KeyMode != "round-robin" {
@@ -1486,7 +1541,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "id": id})
 		case "update":
 			if err := h.pool.UpdateChannel(req.ID, req.Name, req.Prefix, req.BaseURL, req.WebsiteURL, req.ChannelType, req.ProxyURL, req.AllowedModels); err != nil {
-				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			// Also update key_mode if provided.
@@ -1496,7 +1551,7 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		case "set-key-mode":
 			if err := h.pool.SetKeyMode(req.ID, req.KeyMode); err != nil {
-				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -1513,11 +1568,11 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			h.pool.SetDefaultChannel(req.ID)
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		default:
-			http.Error(w, `{"error":"Unknown action"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Unknown action")
 		}
 
 	default:
-		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }
 
@@ -1533,12 +1588,12 @@ func (h *Handler) Backup(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		backup, err := h.pool.ExportBackup()
 		if err != nil {
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		body, err := json.MarshalIndent(backup, "", "  ")
 		if err != nil {
-			http.Error(w, `{"error":"Failed to encode backup"}`, http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "Failed to encode backup")
 			return
 		}
 		filename := "mimo-proxy-backup-" + time.Now().Format("20060102-150405") + ".json"
@@ -1549,12 +1604,12 @@ func (h *Handler) Backup(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 		var backup BackupData
 		if err := json.NewDecoder(r.Body).Decode(&backup); err != nil {
-			http.Error(w, `{"error":"Invalid backup file"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Invalid backup file")
 			return
 		}
 		summary, err := h.pool.ImportBackup(&backup)
 		if err != nil {
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		h.modelMu.Lock()
@@ -1563,13 +1618,13 @@ func (h *Handler) Backup(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "summary": summary})
 
 	default:
-		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }
 
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
 
@@ -1583,7 +1638,7 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 	keys, err := h.pool.GetAll(0)
 	if err != nil {
-		http.Error(w, `{"error":"Failed to get keys"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to get keys")
 		return
 	}
 
@@ -1716,7 +1771,7 @@ func messagesCountTokensURLFromBase(baseURL string) string {
 // Messages proxies POST /v1/messages to the upstream Anthropic-compatible API.
 func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Only POST method is allowed"}}`, http.StatusMethodNotAllowed)
+		writeAnthropicError(w, http.StatusMethodNotAllowed, "Only POST method is allowed", "invalid_request_error")
 		return
 	}
 
@@ -1732,13 +1787,13 @@ func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Failed to read request body"}}`, http.StatusBadRequest)
+		writeAnthropicError(w, http.StatusBadRequest, "Failed to read request body", "invalid_request_error")
 		return
 	}
 
 	channel, err := h.resolveChannel(r)
 	if err != nil {
-		http.Error(w, `{"type":"error","error":{"type":"not_found_error","message":"Channel not found"}}`, http.StatusNotFound)
+		writeAnthropicError(w, http.StatusNotFound, "Channel not found", "not_found_error")
 		return
 	}
 
@@ -1757,14 +1812,14 @@ func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if mm := h.pool.GetModelMappingByName(originalModel); mm != nil && !mm.Enabled {
 		// Model name matches a disabled mapping — return error directly.
-		http.Error(w, fmt.Sprintf(`{"type":"error","error":{"type":"invalid_request_error","message":"Model mapping '%s' is disabled"}}`, originalModel), http.StatusBadRequest)
+		writeAnthropicError(w, http.StatusBadRequest, fmt.Sprintf("Model mapping '%s' is disabled", originalModel), "invalid_request_error")
 		return
 	}
 	log.Printf("[messages] originalModel=%s mappedModel=%s channel=%s(%d) modelMapped=%v", originalModel, mappedModelName, channel.Name, channel.ID, modelMapped)
 
 	key, defaultModel, err := h.pool.GetKey(channel.ID)
 	if err != nil {
-		http.Error(w, `{"type":"error","error":{"type":"api_error","message":"No API key available: `+err.Error()+`"}}`, http.StatusServiceUnavailable)
+		writeAnthropicError(w, http.StatusServiceUnavailable, "No API key available: "+err.Error(), "api_error")
 		return
 	}
 
@@ -1782,7 +1837,7 @@ func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 	upstreamURL := messagesURLFromBase(channel.BaseURL)
 	req, err := http.NewRequest(http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		http.Error(w, `{"type":"error","error":{"type":"api_error","message":"Failed to create request"}}`, http.StatusInternalServerError)
+		writeAnthropicError(w, http.StatusInternalServerError, "Failed to create request", "api_error")
 		return
 	}
 
@@ -1805,7 +1860,7 @@ func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 	resp, err := client.Do(req)
 	if err != nil {
 		h.recordKeyFailure(key)
-		http.Error(w, `{"type":"error","error":{"type":"api_error","message":"Failed to proxy request: `+err.Error()+`"}}`, http.StatusBadGateway)
+		writeAnthropicError(w, http.StatusBadGateway, "Failed to proxy request: "+err.Error(), "api_error")
 		return
 	}
 	defer resp.Body.Close()
@@ -1914,7 +1969,7 @@ func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
 // MessagesCountTokens proxies POST /v1/messages/count_tokens to the upstream Anthropic-compatible API.
 func (h *Handler) MessagesCountTokens(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Only POST method is allowed"}}`, http.StatusMethodNotAllowed)
+		writeAnthropicError(w, http.StatusMethodNotAllowed, "Only POST method is allowed", "invalid_request_error")
 		return
 	}
 
@@ -1927,26 +1982,26 @@ func (h *Handler) MessagesCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Failed to read request body"}}`, http.StatusBadRequest)
+		writeAnthropicError(w, http.StatusBadRequest, "Failed to read request body", "invalid_request_error")
 		return
 	}
 
 	channel, err := h.resolveChannel(r)
 	if err != nil {
-		http.Error(w, `{"type":"error","error":{"type":"not_found_error","message":"Channel not found"}}`, http.StatusNotFound)
+		writeAnthropicError(w, http.StatusNotFound, "Channel not found", "not_found_error")
 		return
 	}
 
 	key, _, err := h.pool.GetKey(channel.ID)
 	if err != nil {
-		http.Error(w, `{"type":"error","error":{"type":"api_error","message":"No API key available"}}`, http.StatusServiceUnavailable)
+		writeAnthropicError(w, http.StatusServiceUnavailable, "No API key available", "api_error")
 		return
 	}
 
 	upstreamURL := messagesCountTokensURLFromBase(channel.BaseURL)
 	req, err := http.NewRequest(http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		http.Error(w, `{"type":"error","error":{"type":"api_error","message":"Failed to create request"}}`, http.StatusInternalServerError)
+		writeAnthropicError(w, http.StatusInternalServerError, "Failed to create request", "api_error")
 		return
 	}
 
@@ -1965,7 +2020,7 @@ func (h *Handler) MessagesCountTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		http.Error(w, `{"type":"error","error":{"type":"api_error","message":"Upstream request failed: `+err.Error()+`"}}`, http.StatusBadGateway)
+		writeAnthropicError(w, http.StatusBadGateway, "Upstream request failed: "+err.Error(), "api_error")
 		return
 	}
 	defer resp.Body.Close()
