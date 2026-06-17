@@ -1,9 +1,7 @@
 package keypool
 
 import (
-	"bufio"
 	"bytes"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -105,27 +103,27 @@ func writeAnthropicError(w http.ResponseWriter, status int, msg, errType string)
 	writeJSON(w, status, b)
 }
 
-//go:embed ui/*
-var uiEmbed embed.FS
-
 type modelCache struct {
 	models  []string
 	updated time.Time
 }
 
 type Handler struct {
-	pool       *KeyPool
-	keyFails   map[string]int
-	keyFailsMu sync.RWMutex
-	modelCache map[int]*modelCache // channelID → cached models
-	modelMu    sync.RWMutex
+	pool           *KeyPool
+	keyFails       map[string]int
+	keyFailsMu     sync.RWMutex
+	modelCache     map[int]*modelCache // channelID → cached models
+	modelMu        sync.RWMutex
+	transportCache map[string]*http.Transport // proxyURL → transport
+	transportMu    sync.RWMutex
 }
 
 func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	h := &Handler{
-		pool:       pool,
-		keyFails:   make(map[string]int),
-		modelCache: make(map[int]*modelCache),
+		pool:           pool,
+		keyFails:       make(map[string]int),
+		modelCache:     make(map[int]*modelCache),
+		transportCache: make(map[string]*http.Transport),
 	}
 
 	mux := http.NewServeMux()
@@ -163,9 +161,9 @@ func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	mux.HandleFunc("/backup", h.Backup)
 	mux.HandleFunc("/logs", h.Logs)
 
-	// Periodic log cleanup (every 5 minutes)
+	// Periodic log cleanup
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(LogCleanupInterval)
 		defer ticker.Stop()
 		for range ticker.C {
 			h.pool.CleanLogs()
@@ -173,248 +171,6 @@ func NewMux(pool *KeyPool, defaultURL string) *http.ServeMux {
 	}()
 
 	return mux
-}
-
-func (h *Handler) UIRedirect(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/ui/channels", http.StatusFound)
-}
-
-func (h *Handler) UIKeys(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/ui/channels", http.StatusFound)
-}
-
-func (h *Handler) UIChannels(w http.ResponseWriter, r *http.Request) {
-	h.serveUIPage(w, "ui/channels.html")
-}
-
-func (h *Handler) UIMappings(w http.ResponseWriter, r *http.Request) {
-	h.serveUIPage(w, "ui/mappings.html")
-}
-
-func (h *Handler) UILogs(w http.ResponseWriter, r *http.Request) {
-	h.serveUIPage(w, "ui/logs.html")
-}
-
-func (h *Handler) UISettings(w http.ResponseWriter, r *http.Request) {
-	h.serveUIPage(w, "ui/settings.html")
-}
-
-func (h *Handler) UIStaticCSS(w http.ResponseWriter, r *http.Request) {
-	data, err := uiEmbed.ReadFile("ui/style.css")
-	if err != nil {
-		http.Error(w, "Not found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Write(data)
-}
-
-func (h *Handler) UIStaticJS(w http.ResponseWriter, r *http.Request) {
-	data, err := uiEmbed.ReadFile("ui/common.js")
-	if err != nil {
-		http.Error(w, "Not found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	w.Write(data)
-}
-
-func (h *Handler) serveUIPage(w http.ResponseWriter, path string) {
-	data, err := uiEmbed.ReadFile(path)
-	if err != nil {
-		http.Error(w, "Failed to load page", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(data)
-}
-
-func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "Only POST method is allowed", "invalid_request_error", "405")
-		return
-	}
-
-	// Validate proxy key
-	if !h.validateProxyAuth(r) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":{"message":"Invalid or missing API key","type":"invalid_request_error","code":"invalid_api_key"}}`))
-		return
-	}
-
-	start := time.Now()
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeOpenAIError(w, http.StatusBadRequest, "Failed to read request body", "invalid_request_error", "400")
-		return
-	}
-
-	channel, err := h.resolveChannel(r)
-	if err != nil {
-		writeOpenAIError(w, http.StatusNotFound, "Channel not found", "invalid_request_error", "404")
-		return
-	}
-
-	// Save the original model name before any mapping/replacement (for logging).
-	originalModel := extractModel(body)
-
-	// Check model mapping: if the request model is a mapping alias, swap model and channel.
-	modelMapped := false
-	mappedModelName := ""
-	if mappedChannelID, mappedModel, ok := h.pool.ResolveModelMapping(originalModel); ok && mappedModel != "" {
-		if mc, merr := h.pool.GetChannelByID(mappedChannelID); merr == nil && mc.Enabled {
-			mappedModelName = mappedModel
-			body = replaceModel(body, mappedModel)
-			channel = mc
-			modelMapped = true
-		}
-	} else if mm := h.pool.GetModelMappingByName(originalModel); mm != nil && !mm.Enabled {
-		// Model name matches a disabled mapping — return error directly.
-		writeOpenAIError(w, http.StatusBadRequest, fmt.Sprintf("Model mapping '%s' is disabled", originalModel), "invalid_request_error", "mapping_disabled")
-		return
-	}
-	log.Printf("[chat] originalModel=%s mappedModel=%s channel=%s(%d) modelMapped=%v", originalModel, mappedModelName, channel.Name, channel.ID, modelMapped)
-
-	key, defaultModel, err := h.pool.GetKey(channel.ID)
-	if err != nil {
-		writeOpenAIError(w, http.StatusServiceUnavailable, "No API key available: "+err.Error(), "api_error", "503")
-		return
-	}
-
-	// Get or refresh model cache (1h TTL). Fetches from upstream on miss/expiry.
-	// Skip swapModelIfNeeded when a model mapping was applied to preserve the mapped target model.
-	if !modelMapped {
-		models := h.getOrFetchModels(channel, key)
-		body = h.swapModelIfNeeded(body, models, defaultModel)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, chatCompletionsURLFromBase(channel.BaseURL), bytes.NewReader(body))
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, "Failed to create request", "api_error", "500")
-		return
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", key)
-
-	if auth := r.Header.Get("Authorization"); auth != "" {
-		parts := strings.SplitN(auth, " ", 2)
-		if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
-			req.Header.Set("Authorization", "Bearer "+key)
-		}
-	}
-	h.prepareUpstreamRequest(req)
-
-	client, cerr := h.upstreamClientForChannel(channel, 120*time.Second)
-	if cerr != nil {
-		log.Printf("[proxy] fallback to direct: %v", cerr)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		h.recordKeyFailure(key)
-		writeOpenAIError(w, http.StatusBadGateway, "Failed to proxy request: "+err.Error(), "api_error", "502")
-		return
-	}
-	defer resp.Body.Close()
-
-	// Track key health: 401/403 indicate a bad key.
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		h.recordKeyFailure(key)
-		// In failover mode, disable the key and clear failover_key immediately.
-		if channel.KeyMode == "failover" {
-			h.pool.RotateFailoverKey(channel.ID, key)
-		}
-	} else {
-		h.resetKeyFailures(key)
-	}
-
-	// Forward response headers.
-	for k, v := range resp.Header {
-		w.Header()[k] = v
-	}
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	w.WriteHeader(resp.StatusCode)
-
-	proxyKey := extractProxyKey(r)
-	// Use the original model name (before mapping) for logging.
-	model := originalModel
-
-	// Check if this is a streaming response.
-	isStreaming := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
-
-	if isStreaming {
-		// Stream: forward chunks line by line, accumulate for logging.
-		var promptTokens, completionTokens, totalTokens int
-		var streamBuf bytes.Buffer
-		flusher, _ := w.(http.Flusher)
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			w.Write(line)
-			w.Write([]byte("\n"))
-			if flusher != nil {
-				flusher.Flush()
-			}
-			// Accumulate all lines for logging.
-			streamBuf.Write(line)
-			streamBuf.WriteByte('\n')
-			// Try to extract usage from data: chunks.
-			if bytes.HasPrefix(line, []byte("data: ")) && !bytes.Contains(line, []byte("[DONE]")) {
-				var chunk map[string]interface{}
-				if json.Unmarshal(line[6:], &chunk) == nil {
-					if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-						if v, ok := usage["prompt_tokens"].(float64); ok {
-							promptTokens = int(v)
-						}
-						if v, ok := usage["completion_tokens"].(float64); ok {
-							completionTokens = int(v)
-						}
-						if v, ok := usage["total_tokens"].(float64); ok {
-							totalTokens = int(v)
-						}
-					}
-				}
-			}
-		}
-		h.pool.IncrementUsage(key, promptTokens, completionTokens, totalTokens)
-		go h.pool.LogRequest(&RequestLog{
-			Method: "POST", Path: "/v1/chat/completions", StatusCode: resp.StatusCode,
-			LatencyMs: time.Since(start).Milliseconds(), ProxyKey: proxyKey, UpstreamKey: truncKey(key, 8),
-			Model: model, PromptTokens: promptTokens, CompletionTokens: completionTokens, TotalTokens: totalTokens,
-			RequestBody: string(body), ResponseBody: streamBuf.String(),
-		})
-	} else {
-		// Non-streaming: read full body, extract usage, write to client.
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		var promptTokens, completionTokens, totalTokens int
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			var parsed map[string]interface{}
-			if json.Unmarshal(bodyBytes, &parsed) == nil {
-				if usage, ok := parsed["usage"].(map[string]interface{}); ok {
-					if v, ok := usage["prompt_tokens"].(float64); ok {
-						promptTokens = int(v)
-					}
-					if v, ok := usage["completion_tokens"].(float64); ok {
-						completionTokens = int(v)
-					}
-					if v, ok := usage["total_tokens"].(float64); ok {
-						totalTokens = int(v)
-					}
-				}
-			}
-		}
-		h.pool.IncrementUsage(key, promptTokens, completionTokens, totalTokens)
-		go h.pool.LogRequest(&RequestLog{
-			Method: "POST", Path: "/v1/chat/completions", StatusCode: resp.StatusCode,
-			LatencyMs: time.Since(start).Milliseconds(), ProxyKey: proxyKey, UpstreamKey: truncKey(key, 8),
-			Model: model, PromptTokens: promptTokens, CompletionTokens: completionTokens, TotalTokens: totalTokens,
-			RequestBody: string(body), ResponseBody: string(bodyBytes),
-		})
-		w.Write(bodyBytes)
-	}
 }
 
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
@@ -495,8 +251,8 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 			DefaultModel string `json:"default_model"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Invalid request body")
-		return
+			writeJSONError(w, http.StatusBadRequest, "Invalid request body")
+			return
 		}
 
 		var err error
@@ -677,14 +433,14 @@ func (h *Handler) TestKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // recordKeyFailure increments the consecutive failure count for a key.
-// After 3 consecutive failures the key is automatically disabled.
+// After KeyFailThreshold consecutive failures the key is automatically disabled.
 func (h *Handler) recordKeyFailure(key string) {
 	h.keyFailsMu.Lock()
 	h.keyFails[key]++
 	count := h.keyFails[key]
 	h.keyFailsMu.Unlock()
 
-	if count >= 3 {
+	if count >= KeyFailThreshold {
 		log.Printf("[auto-disable] key %s...%s failed %d times consecutively, disabling",
 			truncKey(key, 4), truncKey(key, -4), count)
 		h.pool.Disable(key)
@@ -754,7 +510,7 @@ func (h *Handler) refreshModelsWithType(channelID int, modelsURL string, key str
 
 	// Look up the channel so its proxy is honored.
 	channel, _ := h.pool.GetChannelByID(channelID)
-	client, _ := h.upstreamClientForChannel(channel, 10*time.Second)
+	client, _ := h.upstreamClientForChannel(channel, ModelsFetchTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil
@@ -782,12 +538,12 @@ func (h *Handler) refreshModelsWithType(channelID int, modelsURL string, key str
 	return models
 }
 
-// getCachedModels returns cached models for a channel, or nil if not cached / expired (1h).
+// getCachedModels returns cached models for a channel, or nil if not cached / expired.
 func (h *Handler) getCachedModels(channelID int) []string {
 	h.modelMu.RLock()
 	defer h.modelMu.RUnlock()
 	entry, ok := h.modelCache[channelID]
-	if !ok || time.Since(entry.updated) > time.Hour {
+	if !ok || time.Since(entry.updated) > ModelsCacheTTL {
 		return nil
 	}
 	return entry.models
@@ -1098,9 +854,8 @@ func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channel
 		return
 	}
 
-	// Build reverse mapping: target_model → mapping_name (for this channel type)
-	mappedNames := make(map[string]string) // target_model → mapping alias
-	mappedOnly := make(map[string]bool)    // all mapping names for this type
+	mappedNames := make(map[string]string)
+	mappedOnly := make(map[string]bool)
 	if mappings, merr := h.pool.GetAllModelMappings(); merr == nil {
 		for _, m := range mappings {
 			if !m.Enabled || m.ChannelType != channelType {
@@ -1115,7 +870,6 @@ func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channel
 		}
 	}
 
-	// If no mappings exist for this type, return empty list.
 	if len(mappedOnly) == 0 {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"object": "list", "data": []interface{}{}})
@@ -1168,7 +922,6 @@ func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channel
 			continue
 		}
 
-		// Apply allowed_models filter
 		allowedSet := make(map[string]bool)
 		if len(ch.AllowedModels) > 0 {
 			for _, m := range ch.AllowedModels {
@@ -1179,12 +932,11 @@ func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channel
 			if len(allowedSet) > 0 && !allowedSet[m.ID] {
 				continue
 			}
-			// Only include models that have a mapping.
 			alias, hasMapping := mappedNames[m.ID]
 			if !hasMapping {
-				continue // skip unmapped upstream models
+				continue
 			}
-			delete(mappedOnly, alias) // mark as backed by upstream
+			delete(mappedOnly, alias)
 			if !seen[alias] {
 				seen[alias] = true
 				models = append(models, modelEntry{ID: alias, Object: "model", OwnedBy: m.OwnedBy})
@@ -1192,7 +944,6 @@ func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channel
 		}
 	}
 
-	// Add remaining mappings not backed by any upstream model (standalone aliases).
 	for name := range mappedOnly {
 		if !seen[name] {
 			seen[name] = true
@@ -1200,17 +951,13 @@ func (h *Handler) v1ModelsByType(w http.ResponseWriter, r *http.Request, channel
 		}
 	}
 
-	result := map[string]interface{}{
-		"object": "list",
-		"data":   models,
-	}
+	result := map[string]interface{}{"object": "list", "data": models}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
 
 func (h *Handler) ProxyKeys(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	switch r.Method {
 	case http.MethodGet:
 		keys, err := h.pool.GetAllProxyKeys()
@@ -1219,7 +966,6 @@ func (h *Handler) ProxyKeys(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"keys": keys})
-
 	case http.MethodPost:
 		var req struct {
 			Action string `json:"action"`
@@ -1230,7 +976,6 @@ func (h *Handler) ProxyKeys(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusBadRequest, "Invalid request")
 			return
 		}
-
 		switch req.Action {
 		case "generate":
 			key, err := h.pool.GenerateProxyKey(req.Note)
@@ -1239,32 +984,27 @@ func (h *Handler) ProxyKeys(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "key": key})
-
 		case "remove":
 			if err := h.pool.RemoveProxyKey(req.Key); err != nil {
 				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-
 		case "enable":
 			if err := h.pool.EnableProxyKey(req.Key); err != nil {
 				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-
 		case "disable":
 			if err := h.pool.DisableProxyKey(req.Key); err != nil {
 				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-
 		default:
 			writeJSONError(w, http.StatusBadRequest, "Unknown action")
 		}
-
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
@@ -1272,7 +1012,6 @@ func (h *Handler) ProxyKeys(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	switch r.Method {
 	case http.MethodGet:
 		mappings, err := h.pool.GetAllModelMappings()
@@ -1281,7 +1020,6 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"mappings": mappings})
-
 	case http.MethodPost:
 		var req struct {
 			Action      string               `json:"action"`
@@ -1291,15 +1029,13 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 			Strategy    string               `json:"strategy"`
 			Note        string               `json:"note"`
 			Targets     []ModelMappingTarget `json:"targets"`
-			// Legacy fields (for backward compat)
-			ChannelID   int    `json:"channel_id"`
-			TargetModel string `json:"target_model"`
+			ChannelID   int                  `json:"channel_id"`
+			TargetModel string               `json:"target_model"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "Invalid request")
 			return
 		}
-
 		var err error
 		switch req.Action {
 		case "add":
@@ -1335,20 +1071,16 @@ func (h *Handler) ModelMappings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }
 
-// TestMapping sends a real request to the upstream API using the mapping's channel and target model,
-// verifying the mapping is reachable and the target model exists.
 func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
-
 	var req struct {
 		ID          int    `json:"id"`
 		ChannelID   int    `json:"channel_id"`
@@ -1358,8 +1090,6 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
-
-	// If ID is provided, look up the mapping and use first target
 	if req.ID > 0 {
 		mappings, _ := h.pool.GetAllModelMappings()
 		for _, m := range mappings {
@@ -1379,8 +1109,6 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "Channel not found")
 		return
 	}
-
-	// Resolve channel
 	var channel *ChannelInfo
 	channels, _ := h.pool.GetAllChannels()
 	for _, c := range channels {
@@ -1393,15 +1121,11 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "Channel not found")
 		return
 	}
-
-	// Get a key for this channel
 	key, _, err := h.pool.GetKey(channel.ID)
 	if err != nil || key == "" {
 		writeJSONError(w, http.StatusBadGateway, "No available key for channel")
 		return
 	}
-
-	// Build and send test request
 	start := time.Now()
 	testURL := chatCompletionsURLFromBase(channel.BaseURL)
 	testBody := testPayload(req.TargetModel)
@@ -1409,7 +1133,6 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 		testURL = messagesURLFromBase(channel.BaseURL)
 		testBody = testMessagesPayload(req.TargetModel)
 	}
-
 	proxyReq, err := http.NewRequest(http.MethodPost, testURL, bytes.NewReader(testBody))
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to create request")
@@ -1424,7 +1147,6 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 		proxyReq.Header.Set("Authorization", "Bearer "+key)
 	}
 	h.prepareUpstreamRequest(proxyReq)
-
 	client, cerr := h.upstreamClientForChannel(channel, 30*time.Second)
 	if cerr != nil {
 		log.Printf("[proxy] fallback to direct: %v", cerr)
@@ -1436,27 +1158,16 @@ func (h *Handler) TestMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 	latency := time.Since(start).Milliseconds()
-
 	body, _ := io.ReadAll(resp.Body)
-
 	w.Header().Set("Content-Type", "application/json")
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		var result map[string]interface{}
 		json.Unmarshal(body, &result)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  "ok",
-			"latency": latency,
-			"data":    result,
-		})
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "latency": latency, "data": result})
 	} else {
 		var result map[string]interface{}
 		json.Unmarshal(body, &result)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":     "error",
-			"code":       resp.StatusCode,
-			"latency":    latency,
-			"error_body": result,
-		})
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "error", "code": resp.StatusCode, "latency": latency, "error_body": result})
 	}
 }
 
@@ -1465,8 +1176,6 @@ func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
 		return
 	}
-
-	// Detail: GET /logs?id=123
 	if idStr := r.URL.Query().Get("id"); idStr != "" {
 		var id int
 		fmt.Sscanf(idStr, "%d", &id)
@@ -1479,7 +1188,6 @@ func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(log)
 		return
 	}
-
 	page := 1
 	fmt.Sscanf(r.URL.Query().Get("page"), "%d", &page)
 	if page < 1 {
@@ -1491,16 +1199,11 @@ func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"logs":  logs,
-		"total": total,
-		"page":  page,
-	})
+	json.NewEncoder(w).Encode(map[string]interface{}{"logs": logs, "total": total, "page": page})
 }
 
 func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	switch r.Method {
 	case http.MethodGet:
 		channels, err := h.pool.GetAllChannels()
@@ -1509,7 +1212,6 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"channels": channels})
-
 	case http.MethodPost:
 		var req struct {
 			Action        string   `json:"action"`
@@ -1527,7 +1229,6 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusBadRequest, "Invalid request")
 			return
 		}
-
 		switch req.Action {
 		case "add":
 			id, err := h.pool.AddChannel(req.Name, req.Prefix, req.BaseURL, req.WebsiteURL, req.ChannelType, req.ProxyURL, req.AllowedModels)
@@ -1544,7 +1245,6 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			// Also update key_mode if provided.
 			if req.KeyMode != "" {
 				h.pool.SetKeyMode(req.ID, req.KeyMode)
 			}
@@ -1570,7 +1270,6 @@ func (h *Handler) Channels(w http.ResponseWriter, r *http.Request) {
 		default:
 			writeJSONError(w, http.StatusBadRequest, "Unknown action")
 		}
-
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
@@ -1583,7 +1282,6 @@ func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Backup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	switch r.Method {
 	case http.MethodGet:
 		backup, err := h.pool.ExportBackup()
@@ -1599,7 +1297,6 @@ func (h *Handler) Backup(w http.ResponseWriter, r *http.Request) {
 		filename := "mimo-proxy-backup-" + time.Now().Format("20060102-150405") + ".json"
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 		w.Write(body)
-
 	case http.MethodPost:
 		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 		var backup BackupData
@@ -1616,7 +1313,6 @@ func (h *Handler) Backup(w http.ResponseWriter, r *http.Request) {
 		h.modelCache = make(map[int]*modelCache)
 		h.modelMu.Unlock()
 		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "summary": summary})
-
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
@@ -1627,36 +1323,26 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
-
-	var req struct {
-		Threshold int `json:"threshold"`
-	}
+	var req struct{ Threshold int }
 	json.NewDecoder(r.Body).Decode(&req)
 	if req.Threshold <= 0 {
 		req.Threshold = 3
 	}
-
 	keys, err := h.pool.GetAll(0)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to get keys")
 		return
 	}
-
 	enabled := make([]KeyInfo, 0)
 	for _, k := range keys {
 		if k.Enabled {
 			enabled = append(enabled, k)
 		}
 	}
-
 	if len(enabled) == 0 {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"results":        []interface{}{},
-			"disabled_count": 0,
-		})
+		json.NewEncoder(w).Encode(map[string]interface{}{"results": []interface{}{}, "disabled_count": 0})
 		return
 	}
-
 	type checkResult struct {
 		Key      string `json:"key"`
 		Status   string `json:"status"`
@@ -1664,15 +1350,12 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		Error    string `json:"error,omitempty"`
 		Disabled bool   `json:"disabled"`
 	}
-
 	results := make([]checkResult, 0, len(enabled))
 	disabledCount := 0
-
 	for _, k := range enabled {
 		fails := 0
 		var lastLatency int64
 		var lastErr string
-
 		for attempt := 0; attempt < req.Threshold; attempt++ {
 			start := time.Now()
 			ch, _ := h.pool.GetDefaultChannel()
@@ -1689,7 +1372,6 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 			testReq.Header.Set("api-key", k.Key)
 			testReq.Header.Set("Authorization", "Bearer "+k.Key)
 			h.prepareUpstreamRequest(testReq)
-
 			client, _ := h.upstreamClientForChannel(ch, 15*time.Second)
 			resp, err := client.Do(testReq)
 			if err != nil {
@@ -1700,7 +1382,6 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 			}
 			resp.Body.Close()
 			lastLatency = time.Since(start).Milliseconds()
-
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				fails = 0
 				lastErr = ""
@@ -1709,334 +1390,20 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 			fails++
 			lastErr = fmt.Sprintf("HTTP %d", resp.StatusCode)
 		}
-
 		masked := k.Key
 		if len(masked) > 8 {
-			masked = masked[:4] + "••••" + masked[len(masked)-4:]
+			masked = masked[:4] + "\u2022\u2022\u2022\u2022" + masked[len(masked)-4:]
 		} else if len(masked) > 4 {
-			masked = "••••" + masked[len(masked)-4:]
+			masked = "\u2022\u2022\u2022\u2022" + masked[len(masked)-4:]
 		}
-
 		if fails >= req.Threshold {
 			h.pool.Disable(k.Key)
 			disabledCount++
-			results = append(results, checkResult{
-				Key:      masked,
-				Status:   "fail",
-				Latency:  lastLatency,
-				Error:    lastErr,
-				Disabled: true,
-			})
+			results = append(results, checkResult{Key: masked, Status: "fail", Latency: lastLatency, Error: lastErr, Disabled: true})
 		} else {
-			results = append(results, checkResult{
-				Key:     masked,
-				Status:  "ok",
-				Latency: lastLatency,
-			})
+			results = append(results, checkResult{Key: masked, Status: "ok", Latency: lastLatency})
 		}
 	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"results":        results,
-		"disabled_count": disabledCount,
-	})
-}
-
-// messagesURLFromBase derives the Anthropic messages endpoint from the configured upstream URL.
-func messagesURLFromBase(baseURL string) string {
-	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
-	if err != nil {
-		return ""
-	}
-	u.RawQuery = ""
-	u.Fragment = ""
-
-	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
-	for i, segment := range segments {
-		if segment == "v1" {
-			u.Path = "/" + strings.Join(segments[:i+1], "/")
-			return strings.TrimRight(u.String(), "/") + "/messages"
-		}
-	}
-
-	return strings.TrimRight(u.String(), "/") + "/v1/messages"
-}
-
-// messagesCountTokensURLFromBase derives the Anthropic count_tokens endpoint.
-func messagesCountTokensURLFromBase(baseURL string) string {
-	return messagesURLFromBase(baseURL) + "/count_tokens"
-}
-
-// Messages proxies POST /v1/messages to the upstream Anthropic-compatible API.
-func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeAnthropicError(w, http.StatusMethodNotAllowed, "Only POST method is allowed", "invalid_request_error")
-		return
-	}
-
-	// Validate proxy key
-	if !h.validateProxyAuth(r) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"Invalid or missing API key"}}`))
-		return
-	}
-
-	start := time.Now()
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeAnthropicError(w, http.StatusBadRequest, "Failed to read request body", "invalid_request_error")
-		return
-	}
-
-	channel, err := h.resolveChannel(r)
-	if err != nil {
-		writeAnthropicError(w, http.StatusNotFound, "Channel not found", "not_found_error")
-		return
-	}
-
-	// Save the original model name before any mapping/replacement (for logging).
-	originalModel := extractModel(body)
-
-	// Check model mapping: if the request model is a mapping alias, swap model and channel.
-	modelMapped := false
-	mappedModelName := ""
-	if mappedChannelID, mappedModel, ok := h.pool.ResolveModelMapping(originalModel); ok && mappedModel != "" {
-		if mc, merr := h.pool.GetChannelByID(mappedChannelID); merr == nil && mc.Enabled {
-			mappedModelName = mappedModel
-			body = replaceModel(body, mappedModel)
-			channel = mc
-			modelMapped = true
-		}
-	} else if mm := h.pool.GetModelMappingByName(originalModel); mm != nil && !mm.Enabled {
-		// Model name matches a disabled mapping — return error directly.
-		writeAnthropicError(w, http.StatusBadRequest, fmt.Sprintf("Model mapping '%s' is disabled", originalModel), "invalid_request_error")
-		return
-	}
-	log.Printf("[messages] originalModel=%s mappedModel=%s channel=%s(%d) modelMapped=%v", originalModel, mappedModelName, channel.Name, channel.ID, modelMapped)
-
-	key, defaultModel, err := h.pool.GetKey(channel.ID)
-	if err != nil {
-		writeAnthropicError(w, http.StatusServiceUnavailable, "No API key available: "+err.Error(), "api_error")
-		return
-	}
-
-	// Swap model if needed (reuse same logic).
-	// Skip swapModelIfNeeded when a model mapping was applied to preserve the mapped target model.
-	if !modelMapped {
-		var models []string
-		models = h.getCachedModels(channel.ID)
-		if models == nil {
-			models = h.refreshModels(channel.ID, modelsURLFromBase(channel.BaseURL), key)
-		}
-		body = h.swapModelIfNeeded(body, models, defaultModel)
-	}
-
-	upstreamURL := messagesURLFromBase(channel.BaseURL)
-	req, err := http.NewRequest(http.MethodPost, upstreamURL, bytes.NewReader(body))
-	if err != nil {
-		writeAnthropicError(w, http.StatusInternalServerError, "Failed to create request", "api_error")
-		return
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	// Anthropic uses x-api-key header
-	req.Header.Set("x-api-key", key)
-	// anthropic-version header
-	if av := r.Header.Get("anthropic-version"); av != "" {
-		req.Header.Set("anthropic-version", av)
-	} else {
-		req.Header.Set("anthropic-version", "2023-06-01")
-	}
-
-	h.prepareUpstreamRequest(req)
-
-	client, cerr := h.upstreamClientForChannel(channel, 120*time.Second)
-	if cerr != nil {
-		log.Printf("[proxy] fallback to direct: %v", cerr)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		h.recordKeyFailure(key)
-		writeAnthropicError(w, http.StatusBadGateway, "Failed to proxy request: "+err.Error(), "api_error")
-		return
-	}
-	defer resp.Body.Close()
-
-	// Track key health
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		h.recordKeyFailure(key)
-		if channel.KeyMode == "failover" {
-			h.pool.RotateFailoverKey(channel.ID, key)
-		}
-	} else {
-		h.resetKeyFailures(key)
-	}
-
-	// Forward response headers
-	for k, v := range resp.Header {
-		w.Header()[k] = v
-	}
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	w.WriteHeader(resp.StatusCode)
-
-	proxyKey := extractProxyKey(r)
-	// Use the original model name (before mapping) for logging.
-	model := originalModel
-
-	isStreaming := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
-
-	if isStreaming {
-		var promptTokens, completionTokens, totalTokens int
-		var streamBuf bytes.Buffer
-		flusher, _ := w.(http.Flusher)
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			w.Write(line)
-			w.Write([]byte("\n"))
-			if flusher != nil {
-				flusher.Flush()
-			}
-			streamBuf.Write(line)
-			streamBuf.WriteByte('\n')
-			// Extract usage from Anthropic streaming: message_start or message_delta events.
-			if bytes.HasPrefix(line, []byte("event: message_start")) {
-				// Next line should be data with usage
-			}
-			if bytes.HasPrefix(line, []byte("data: ")) && !bytes.Contains(line, []byte("[DONE]")) {
-				var chunk map[string]interface{}
-				if json.Unmarshal(line[6:], &chunk) == nil {
-					// Anthropic: usage in message_start
-					if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-						if v, ok := usage["input_tokens"].(float64); ok {
-							promptTokens = int(v)
-						}
-						if v, ok := usage["output_tokens"].(float64); ok {
-							completionTokens = int(v)
-						}
-					}
-					// Anthropic: usage in message_delta
-					if delta, ok := chunk["delta"].(map[string]interface{}); ok {
-						if usage, ok := delta["usage"].(map[string]interface{}); ok {
-							if v, ok := usage["output_tokens"].(float64); ok {
-								completionTokens = int(v)
-							}
-						}
-					}
-				}
-			}
-		}
-		totalTokens = promptTokens + completionTokens
-		h.pool.IncrementUsage(key, promptTokens, completionTokens, totalTokens)
-		go h.pool.LogRequest(&RequestLog{
-			Method: "POST", Path: "/v1/messages", StatusCode: resp.StatusCode,
-			LatencyMs: time.Since(start).Milliseconds(), ProxyKey: proxyKey, UpstreamKey: truncKey(key, 8),
-			Model: model, PromptTokens: promptTokens, CompletionTokens: completionTokens, TotalTokens: totalTokens,
-			RequestBody: string(body), ResponseBody: streamBuf.String(),
-		})
-	} else {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		var promptTokens, completionTokens, totalTokens int
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			var parsed map[string]interface{}
-			if json.Unmarshal(bodyBytes, &parsed) == nil {
-				if usage, ok := parsed["usage"].(map[string]interface{}); ok {
-					if v, ok := usage["input_tokens"].(float64); ok {
-						promptTokens = int(v)
-					}
-					if v, ok := usage["output_tokens"].(float64); ok {
-						completionTokens = int(v)
-					}
-				}
-			}
-		}
-		totalTokens = promptTokens + completionTokens
-		h.pool.IncrementUsage(key, promptTokens, completionTokens, totalTokens)
-		go h.pool.LogRequest(&RequestLog{
-			Method: "POST", Path: "/v1/messages", StatusCode: resp.StatusCode,
-			LatencyMs: time.Since(start).Milliseconds(), ProxyKey: proxyKey, UpstreamKey: truncKey(key, 8),
-			Model: model, PromptTokens: promptTokens, CompletionTokens: completionTokens, TotalTokens: totalTokens,
-			RequestBody: string(body), ResponseBody: string(bodyBytes),
-		})
-		w.Write(bodyBytes)
-	}
-}
-
-// MessagesCountTokens proxies POST /v1/messages/count_tokens to the upstream Anthropic-compatible API.
-func (h *Handler) MessagesCountTokens(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeAnthropicError(w, http.StatusMethodNotAllowed, "Only POST method is allowed", "invalid_request_error")
-		return
-	}
-
-	if !h.validateProxyAuth(r) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"Invalid or missing API key"}}`))
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeAnthropicError(w, http.StatusBadRequest, "Failed to read request body", "invalid_request_error")
-		return
-	}
-
-	channel, err := h.resolveChannel(r)
-	if err != nil {
-		writeAnthropicError(w, http.StatusNotFound, "Channel not found", "not_found_error")
-		return
-	}
-
-	key, _, err := h.pool.GetKey(channel.ID)
-	if err != nil {
-		writeAnthropicError(w, http.StatusServiceUnavailable, "No API key available", "api_error")
-		return
-	}
-
-	upstreamURL := messagesCountTokensURLFromBase(channel.BaseURL)
-	req, err := http.NewRequest(http.MethodPost, upstreamURL, bytes.NewReader(body))
-	if err != nil {
-		writeAnthropicError(w, http.StatusInternalServerError, "Failed to create request", "api_error")
-		return
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", key)
-	if av := r.Header.Get("anthropic-version"); av != "" {
-		req.Header.Set("anthropic-version", av)
-	} else {
-		req.Header.Set("anthropic-version", "2023-06-01")
-	}
-	h.prepareUpstreamRequest(req)
-
-	client, cerr := h.upstreamClientForChannel(channel, 30*time.Second)
-	if cerr != nil {
-		log.Printf("[proxy] fallback to direct: %v", cerr)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		writeAnthropicError(w, http.StatusBadGateway, "Upstream request failed: "+err.Error(), "api_error")
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		h.recordKeyFailure(key)
-	} else {
-		h.resetKeyFailures(key)
-	}
-
-	for k, v := range resp.Header {
-		w.Header()[k] = v
-	}
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	w.WriteHeader(resp.StatusCode)
-
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	w.Write(bodyBytes)
+	json.NewEncoder(w).Encode(map[string]interface{}{"results": results, "disabled_count": disabledCount})
 }

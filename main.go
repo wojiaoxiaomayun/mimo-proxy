@@ -11,13 +11,12 @@ import (
 )
 
 func main() {
-	port := flag.Int("port", 10081, "server port")
+	port := flag.Int("port", keypool.DefaultPort, "server port")
+	targetURL := flag.String("target", keypool.DefaultTargetURL, "upstream API target URL")
+	dbPath := flag.String("db", keypool.DefaultDBPath, "SQLite database file path")
 	flag.Parse()
 
-	targetURL := "https://api.xiaomimimo.com/v1/chat/completions"
-	dbPath := "keys.db"
-
-	pool, err := keypool.New(dbPath, targetURL)
+	pool, err := keypool.New(*dbPath, *targetURL)
 	if err != nil {
 		log.Fatalf("Failed to initialize key pool: %v", err)
 	}
@@ -29,10 +28,17 @@ func main() {
 		}
 	}
 
-	mux := keypool.NewMux(pool, targetURL)
+	mux := keypool.NewMux(pool, *targetURL)
 
-	log.Printf("转发服务启动，监听 :%d，数据存储: %s", *port, dbPath)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), mux); err != nil {
+	log.Printf("转发服务启动，监听 :%d，目标: %s，数据存储: %s", *port, *targetURL, *dbPath)
+	server := &http.Server{
+		Addr:         fmt.Sprintf(":%d", *port),
+		Handler:      mux,
+		ReadTimeout:  keypool.ServerReadTimeout,
+		WriteTimeout: keypool.ServerWriteTimeout,
+		IdleTimeout:  keypool.ServerIdleTimeout,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }

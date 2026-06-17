@@ -20,9 +20,65 @@ const (
 	upstreamUserAgent           = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
-// upstreamClient returns a default *http.Client with timeout only (no proxy).
-func (h *Handler) upstreamClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout}
+// getOrCreateTransport returns a cached *http.Transport for the given proxy URL.
+// An empty proxyURL means direct connection. Transports are cached by proxy URL
+// to reuse TCP connections across requests.
+func (h *Handler) getOrCreateTransport(proxyURL string) (*http.Transport, error) {
+	// Fast path: check cache under read lock.
+	h.transportMu.RLock()
+	if t, ok := h.transportCache[proxyURL]; ok {
+		h.transportMu.RUnlock()
+		return t, nil
+	}
+	h.transportMu.RUnlock()
+
+	// Slow path: build transport under write lock.
+	h.transportMu.Lock()
+	defer h.transportMu.Unlock()
+
+	// Double-check after acquiring write lock.
+	if t, ok := h.transportCache[proxyURL]; ok {
+		return t, nil
+	}
+
+	transport := &http.Transport{
+		MaxIdleConns:        TransportMaxIdleConns,
+		MaxIdleConnsPerHost: TransportMaxIdleConnsPerHost,
+		IdleConnTimeout:     TransportIdleConnTimeout,
+		DialContext:         defaultDialContext(0),
+	}
+
+	if proxyURL != "" {
+		parsed, err := url.Parse(proxyURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return nil, fmt.Errorf("invalid proxy url: %s", proxyURL)
+		}
+
+		scheme := strings.ToLower(parsed.Scheme)
+		switch scheme {
+		case "http", "https":
+			transport.Proxy = http.ProxyURL(parsed)
+		case "socks5", "socks5h":
+			var auth *proxy.Auth
+			if parsed.User != nil {
+				password, _ := parsed.User.Password()
+				auth = &proxy.Auth{User: parsed.User.Username(), Password: password}
+			}
+			dialer, derr := proxy.SOCKS5("tcp", parsed.Host, auth, proxy.Direct)
+			if derr != nil {
+				return nil, fmt.Errorf("socks5 proxy dialer: %w", derr)
+			}
+			transport.Proxy = nil
+			transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			}
+		default:
+			return nil, fmt.Errorf("unsupported proxy scheme: %s", scheme)
+		}
+	}
+
+	h.transportCache[proxyURL] = transport
+	return transport, nil
 }
 
 // upstreamClientForChannel returns an *http.Client that uses the channel's
@@ -36,46 +92,19 @@ func (h *Handler) upstreamClient(timeout time.Duration) *http.Client {
 //
 // If the proxy URL is malformed the function falls back to a direct client
 // (no proxy) and returns the error to the caller for logging.
+//
+// Transports are cached per proxy URL so TCP connections are reused across requests.
 func (h *Handler) upstreamClientForChannel(channel *ChannelInfo, timeout time.Duration) (*http.Client, error) {
-	if channel == nil {
-		return h.upstreamClient(timeout), nil
-	}
-	proxyURL := strings.TrimSpace(channel.ProxyURL)
-	if proxyURL == "" {
-		return h.upstreamClient(timeout), nil
+	var proxyURL string
+	if channel != nil {
+		proxyURL = strings.TrimSpace(channel.ProxyURL)
 	}
 
-	parsed, err := url.Parse(proxyURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return h.upstreamClient(timeout), fmt.Errorf("invalid proxy url: %s", proxyURL)
-	}
-
-	scheme := strings.ToLower(parsed.Scheme)
-	transport := &http.Transport{
-		Proxy:       nil,
-		DialContext: defaultDialContext(timeout),
-	}
-
-	switch scheme {
-	case "http", "https":
-		transport.Proxy = http.ProxyURL(parsed)
-	case "socks5", "socks5h":
-		var auth *proxy.Auth
-		if parsed.User != nil {
-			password, _ := parsed.User.Password()
-			auth = &proxy.Auth{User: parsed.User.Username(), Password: password}
-		}
-		dialer, derr := proxy.SOCKS5("tcp", parsed.Host, auth, proxy.Direct)
-		if derr != nil {
-			return h.upstreamClient(timeout), fmt.Errorf("socks5 proxy dialer: %w", derr)
-		}
-		// For SOCKS5 we must override the DialContext to use the proxy dialer.
-		transport.Proxy = nil
-		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.Dial(network, addr)
-		}
-	default:
-		return h.upstreamClient(timeout), fmt.Errorf("unsupported proxy scheme: %s", scheme)
+	transport, err := h.getOrCreateTransport(proxyURL)
+	if err != nil {
+		// Fallback to direct connection on malformed proxy URL.
+		directTransport, _ := h.getOrCreateTransport("")
+		return &http.Client{Timeout: timeout, Transport: directTransport}, err
 	}
 
 	return &http.Client{Timeout: timeout, Transport: transport}, nil
